@@ -189,59 +189,44 @@ def add_point_to_graph(graph, point, edge):
 def calculate_shortest_path(graph, start_coords, end_coords):
     """Calculates the shortest path using a unified geometry-first approach."""
     
-    # --- Start of Corrected Helper Function ---
     def get_partial_segment(line, p1_coords, p2_coords):
         """
         Extracts a sub-string from a line between two points on that line,
         preserving all intermediate vertices.
         """
-        # Project the start and end coordinates onto the line to find their distance along it
         dist1 = line.project(Point(p1_coords))
         dist2 = line.project(Point(p2_coords))
 
-        # Ensure the distances are in the correct order
         if dist1 > dist2:
             dist1, dist2 = dist2, dist1
             
-        # Get the actual start and end points on the line
         p_start = line.interpolate(dist1)
         p_end = line.interpolate(dist2)
 
-        # Build the new list of coordinates for the sub-path
         new_coords = [tuple(p_start.coords)[0]]
-        
-        # Add all of the original line's vertices that lie between the start and end points
         for coord in list(line.coords):
             p_dist = line.project(Point(coord))
-            # Add a small tolerance (1e-9) to avoid floating point issues
             if p_dist > dist1 + 1e-9 and p_dist < dist2 - 1e-9:
                 new_coords.append(coord)
-                
         new_coords.append(tuple(p_end.coords)[0])
         
-        # Create the new LineString and return its coordinates and length
         sub_line = LineString(new_coords)
         return list(sub_line.coords), sub_line.length
-    # --- End of Corrected Helper Function ---
 
-    # --- Main logic starts here ---
     start_edge, _ = find_nearest_edge(graph, Point(start_coords))
     end_edge, _ = find_nearest_edge(graph, Point(end_coords))
 
     if start_edge is None or end_edge is None:
         return None
 
-    # Case 1: Start and end are on the same edge.
     if start_edge == end_edge:
         line = graph[start_edge[0]][start_edge[1]][0]['geometry']
         route_coords, route_len = get_partial_segment(line, start_coords, end_coords)
         return route_coords, route_len
 
-    # Case 2: Start and end are on different edges.
     start_u, start_v = start_edge
     end_u, end_v = end_edge
 
-    # Find the shortest path between the four possible endpoint combinations of the start/end edges.
     paths = {}
     for s_node in [start_u, start_v]:
         for e_node in [end_u, end_v]:
@@ -250,27 +235,36 @@ def calculate_shortest_path(graph, start_coords, end_coords):
             except nx.NetworkXNoPath:
                 continue
     
-    if not paths: return None # No path exists.
+    if not paths: return None
     
-    # Determine the best nodes on the start and end segments to form the main path.
     start_node_main, end_node_main = min(paths, key=paths.get)
 
-    # Build the final route from three parts: start partial, middle full, end partial.
+    # --- Start of Corrected Route Assembly Logic ---
     
-    # Part 1: Start partial segment
+    # Part 1: Get the start partial segment
     start_line = graph[start_u][start_v][0]['geometry']
     start_coords_list, start_len = get_partial_segment(start_line, start_coords, start_node_main)
-
-    # Part 2: Middle full segments
-    # Handle the two-segment case where start and end are on adjacent trails
-    if start_node_main == end_node_main:
-        # Two-segment route: no middle path needed
-        main_path_nodes = [start_node_main]
-        route_geometry = start_coords_list
-    else:
-        # Multi-segment route: find the path between different nodes
+    # Ensure the start segment is oriented correctly (ending at the main path)
+    if Point(start_coords_list[0]).distance(Point(start_node_main)) < 1e-9:
+        start_coords_list.reverse()
+    
+    # Part 2: Get the end partial segment
+    end_line = graph[end_u][end_v][0]['geometry']
+    end_coords_list, end_len = get_partial_segment(end_line, end_node_main, end_coords)
+    # Ensure the end segment is oriented correctly (starting at the main path)
+    if Point(end_coords_list[0]).distance(Point(end_node_main)) > 1e-9:
+        end_coords_list.reverse()
+        
+    # Part 3: Get the middle full segments
+    if start_node_main != end_node_main:
         main_path_nodes = nx.shortest_path(graph, start_node_main, end_node_main, weight='weight')
-        route_geometry = start_coords_list
+        middle_path_len = paths[(start_node_main, end_node_main)]
+    else: # This handles the two-segment case
+        main_path_nodes = []
+        middle_path_len = 0
+
+    # Stitch all three parts together
+    route_geometry = start_coords_list
     
     for i in range(len(main_path_nodes) - 1):
         u, v = main_path_nodes[i], main_path_nodes[i+1]
@@ -278,37 +272,16 @@ def calculate_shortest_path(graph, start_coords, end_coords):
         coords = list(edge_data['geometry'].coords)
         if Point(coords[0]).distance(Point(u)) > Point(coords[-1]).distance(Point(u)):
             coords.reverse()
-        if route_geometry[-1] == coords[0]:
-            route_geometry.extend(coords[1:])
-        else:
-            route_geometry.extend(coords)
-            
-    # Part 3: End partial segment
-    end_line = graph[end_u][end_v][0]['geometry']
-    end_coords_list, end_len = get_partial_segment(end_line, end_node_main, end_coords)
+        # Append without the first point, which is a duplicate
+        route_geometry.extend(coords[1:])
 
-    if route_geometry[-1] == end_coords_list[0]:
-        route_geometry.extend(end_coords_list[1:])
-    else:
-        route_geometry.extend(end_coords_list)
-        
-    total_length = start_len + paths[(start_node_main, end_node_main)] + end_len
+    # Append the end segment
+    route_geometry.extend(end_coords_list[1:])
     
-    # Debug: Print the route geometry to see what we're returning
-    print(f"DEBUG: Final route has {len(route_geometry)} coordinate pairs")
-    print(f"DEBUG: Start partial: {len(start_coords_list)} coords, length: {start_len:.2f}m")
-    print(f"DEBUG: Middle path: {len(main_path_nodes)} nodes, length: {paths[(start_node_main, end_node_main)]:.2f}m")
-    print(f"DEBUG: End partial: {len(end_coords_list)} coords, length: {end_len:.2f}m")
-    print(f"DEBUG: Total route length: {total_length:.2f}m")
-    
-    # Debug: Show the first few and last few coordinates to see the structure
-    if len(route_geometry) > 0:
-        print(f"DEBUG: First 3 coords: {route_geometry[:3]}")
-        print(f"DEBUG: Last 3 coords: {route_geometry[-3:]}")
-        print(f"DEBUG: Start partial first/last: {start_coords_list[0]} -> {start_coords_list[-1]}")
-        print(f"DEBUG: End partial first/last: {end_coords_list[0]} -> {end_coords_list[-1]}")
+    total_length = start_len + middle_path_len + end_len
     
     return route_geometry, total_length
+    # --- End of Corrected Route Assembly Logic ---
         
 def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, network_type='tlm3d'):
     """The Golden Routing Function."""
