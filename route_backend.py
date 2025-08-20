@@ -43,7 +43,13 @@ def create_clipped_network(start_coords, end_coords, buffer_distance, network_ty
     )
     
     try:
-        clipped_gdf = gpd.read_file(filepath, bbox=bbox)
+        if network_type == 'tlm3d':
+            # For TLM3D, read the specific road network layer
+            clipped_gdf = gpd.read_file(filepath, layer='tlm_strassen_strasse', bbox=bbox)
+        else:
+            # For ski touring, read the default layer
+            clipped_gdf = gpd.read_file(filepath, bbox=bbox)
+            
         if clipped_gdf.empty:
             print("Warning: No segments found in the clipped area.")
             print("Try increasing the buffer distance or selecting different coordinates.")
@@ -108,7 +114,7 @@ def fetch_elevations_for_coordinates(coordinates_2d, chunk_size=100):
     
     Args:
         coordinates_2d: List of (x, y) coordinate tuples in LV95
-        chunk_size: Not used for profile service, kept for compatibility
+        chunk_size: Maximum number of points to send to API (to avoid "Request Entity Too Large")
     
     Returns:
         List of (x, y, elevation) coordinate tuples
@@ -116,9 +122,27 @@ def fetch_elevations_for_coordinates(coordinates_2d, chunk_size=100):
     if not coordinates_2d or len(coordinates_2d) < 2:
         return []
     
+    # Reduce coordinate density if there are too many points
+    if len(coordinates_2d) > chunk_size:
+        # Simple decimation: take every Nth point to reduce to chunk_size
+        step = len(coordinates_2d) // chunk_size
+        reduced_coords = coordinates_2d[::step]
+        # Always include the last point
+        if reduced_coords[-1] != coordinates_2d[-1]:
+            reduced_coords.append(coordinates_2d[-1])
+        print(f"Reduced coordinates from {len(coordinates_2d)} to {len(reduced_coords)} points for API")
+        coordinates_2d = reduced_coords
+    
     # Create a GeoJSON LineString from the route coordinates
     # The API expects coordinates as [x, y] arrays, not tuples
-    coordinates_array = [[x, y] for x, y in coordinates_2d]
+    # Handle both 2D and 3D coordinates by taking only the first two values
+    coordinates_array = []
+    for coord in coordinates_2d:
+        if len(coord) >= 2:
+            coordinates_array.append([coord[0], coord[1]])
+        else:
+            print(f"Warning: Skipping invalid coordinate: {coord}")
+            continue
     
     geojson = {
         "type": "LineString",
@@ -380,12 +404,7 @@ def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, ne
     """The Golden Routing Function."""
     print(f"\n=== Starting Route Calculation ({network_type}) ===")
     
-    # Special handling for TLM3D when file is missing
-    if network_type == 'tlm3d' and not os.path.exists(PREPROCESSED_TLM3D_PATH):
-        print("❌ TLM3D routing is not available yet.")
-        print("   The TLM3D network file needs to be preprocessed first.")
-        print("   For now, please use 'ski_touring' network type.")
-        return None, None, 0
+
     
     clipped_gdf = create_clipped_network(start_coords, end_coords, buffer_distance, network_type)
     
@@ -409,6 +428,7 @@ def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, ne
     try:
         route_geometry, path_length = result
     except Exception as e:
+        print(f"Error unpacking route result: {e}")
         return None, None, segments_loaded, []
     
     if route_geometry:
@@ -418,7 +438,9 @@ def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, ne
         print("Fetching elevation data...")
         try:
             # Get 3D coordinates with elevation
-            coordinates_3d = fetch_elevations_for_coordinates(route_geometry)
+            # Use a smaller chunk size for TLM3D to avoid "Request Entity Too Large" errors
+            chunk_size = 50 if network_type == 'tlm3d' else 100
+            coordinates_3d = fetch_elevations_for_coordinates(route_geometry, chunk_size)
             
             # Calculate elevation profile for charting
             elevation_profile = calculate_elevation_profile(coordinates_3d)
