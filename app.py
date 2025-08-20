@@ -52,25 +52,16 @@ def calculate_route():
         end_lv95 = (end_x, end_y)
 
         # Call the single, reliable "golden routing function" from the backend
-        print(f"DEBUG: Calling calculate_route_from_gpkg with: start={start_lv95}, end={end_lv95}, buffer={buffer_distance}, network={network_type}")
         result = calculate_route_from_gpkg(
             start_lv95,
             end_lv95,
             buffer_distance,
             network_type
         )
-        print(f"DEBUG: calculate_route_from_gpkg returned: {result}")
-        print(f"DEBUG: Return type: {type(result)}")
-        if result is not None:
-            print(f"DEBUG: Return length: {len(result)}")
-            print(f"DEBUG: Return contents: {result}")
         
         try:
             shortest_path, path_length, segments_loaded = result
-            print(f"DEBUG: Successfully unpacked Flask result")
         except Exception as e:
-            print(f"DEBUG: Failed to unpack Flask result: {e}")
-            print(f"DEBUG: Flask result was: {result}")
             return jsonify({'success': False, 'error': f'Internal unpacking error: {e}'}), 500
 
         if shortest_path:

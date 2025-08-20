@@ -68,22 +68,35 @@ def load_network_to_graph(gdf):
     print(f"GeoDataFrame CRS: {gdf.crs}")
     print(f"Sample geometry types: {gdf.geometry.geom_type.unique()}")
     
+    # Create the graph using momepy
     graph = momepy.gdf_to_nx(gdf, approach='primal', length='length')
     print(f"Graph created with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges.")
     
-    # After graph creation, iterate through the original GeoDataFrame and
-    # assign the geometry to the corresponding edge in the graph.
-    # This is more reliable than trying to map back from the graph.
-    geometry_assigned = 0
+    # --- Start of Corrected Section ---
+    # Create a dictionary mapping node pairs to their LineString geometry
+    # This is a more reliable way to map geometries than the previous method.
+    edge_geometries = {}
     for index, row in gdf.iterrows():
-        # momepy stores the original index in 'mm_len'
-        for u, v, data in graph.edges(data=True):
-            if data.get('mm_len') == index:
-                data['geometry'] = row.geometry
-                geometry_assigned += 1
-                break
-    
+        line = row.geometry
+        start_node = tuple(line.coords[0])
+        end_node = tuple(line.coords[-1])
+        # Store geometry for both directions, as graph edges might not be ordered
+        edge_geometries[(start_node, end_node)] = line
+        edge_geometries[(end_node, start_node)] = line
+
+    # Assign the geometry from the dictionary to each edge in the graph
+    for u, v, data in graph.edges(data=True):
+        if (u, v) in edge_geometries:
+            data['geometry'] = edge_geometries[(u, v)]
+    # --- End of Corrected Section ---
+            
+    # Verify that the geometries were assigned
+    geometry_assigned = sum(1 for _, _, data in graph.edges(data=True) if 'geometry' in data)
     print(f"Geometry assigned to {geometry_assigned} edges out of {graph.number_of_edges()} total edges.")
+    
+    if geometry_assigned != graph.number_of_edges():
+        print("Warning: Some edges were not assigned a geometry.")
+        
     return graph
 
 def find_nearest_edge(graph, point):
@@ -96,12 +109,8 @@ def find_nearest_edge(graph, point):
     nearest_edge = None
     min_dist = float('inf')
 
-    print(f"DEBUG: find_nearest_edge called with point: {point}")
-    print(f"DEBUG: Graph has {graph.number_of_edges()} edges")
-
     for u, v, data in graph.edges(data=True):
         try:
-            # print(f"DEBUG: Inspecting edge: ({u}, {v})")  # Commented out for clarity
             if not isinstance(data, dict):
                 print(f"Warning: Edge data is not a dictionary for edge ({u}, {v}). Data: {data}. Skipping.")
                 continue
@@ -110,24 +119,14 @@ def find_nearest_edge(graph, point):
                 line = data['geometry']
                 dist = point.distance(line)
                 if dist < min_dist:
-                    print(
-                        f"DEBUG: New nearest edge found: ({u}, {v}), distance: {dist}"
-                    )
-
                     min_dist = dist
                     nearest_edge = (u, v)
                     snapped_point = nearest_points(point, line)[1]
             else:
-                print(f"DEBUG: Edge ({u}, {v}) missing 'geometry' data. Data: {data}")
+                continue
 
         except Exception as e:
-            print(f"DEBUG: Exception during edge inspection for edge ({u}, {v}): {e}")
-            print(f"DEBUG: Exception type: {type(e)}")
-            import traceback
-            traceback.print_exc()
             continue  # Skip to the next edge
-
-    print(f"DEBUG: find_nearest_edge returning: nearest_edge={nearest_edge}, snapped_point={snapped_point}")
     return nearest_edge, snapped_point
 
 
@@ -140,85 +139,45 @@ def find_nearest_edge(graph, point):
 
 def add_point_to_graph(graph, point, edge):
     """Adds a point to the graph by splitting an existing edge."""
-    print(f"DEBUG: add_point_to_graph called with point={point}, edge={edge}")
-    print(f"DEBUG: edge type: {type(edge)}, edge contents: {edge}")
-    
     try:
         node_u, node_v = edge
-        print(f"DEBUG: Successfully unpacked edge: node_u={node_u}, node_v={node_v}")
     except Exception as e:
-        print(f"DEBUG: Failed to unpack edge: {e}")
-        print(f"DEBUG: edge was: {edge}")
         raise
-    
-    print(f"DEBUG: About to get edge geometry...")
-    print(f"DEBUG: edge: {edge}")
-    print(f"DEBUG: edge type: {type(edge)}")
-    print(f"DEBUG: edge[0] type: {type(edge[0])}")
-    print(f"DEBUG: edge[1] type: {type(edge[1])}")
     
     # The edge is ((x1, y1), (x2, y2)) - coordinate tuples
     # We need to access the graph with these exact coordinate tuples
     try:
-        edge_data = graph.edges[edge]
-        print(f"DEBUG: Successfully got edge data: {edge_data}")
-        print(f"DEBUG: Edge data type: {type(edge_data)}")
-        print(f"DEBUG: Edge data keys: {list(edge_data.keys()) if hasattr(edge_data, 'keys') else 'No keys method'}")
-        
-        if hasattr(edge_data, 'keys'):
-            for key, value in edge_data.items():
-                print(f"DEBUG: key: {key}, value: {value}, type: {type(value)}")
-        
-        edge_geom = edge_data['geometry']
-        print(f"DEBUG: Got edge geometry: {type(edge_geom)}")
+        edge_data = graph[node_u][node_v] # <-- CORRECTED LINE
+        edge_geom = edge_data[0]['geometry']  # MultiGraph: access first edge at index 0
         
     except Exception as e:
-        print(f"DEBUG: Error accessing edge data: {e}")
-        print(f"DEBUG: Available edges in graph: {list(graph.edges())}")
         raise
     
-    print(f"DEBUG: About to check distances...")
     if point.distance(Point(node_u)) < 1e-6: 
-        print(f"DEBUG: Point too close to node_u, returning: {node_u}")
         return node_u
     if point.distance(Point(node_v)) < 1e-6: 
-        print(f"DEBUG: Point too close to node_v, returning: {node_v}")
         return node_v
 
-    print(f"DEBUG: About to remove edge...")
     graph.remove_edge(node_u, node_v)
     
-    print(f"DEBUG: About to create new node...")
     new_node = tuple(point.coords)[0]
-    print(f"DEBUG: New node created: {new_node}")
     
-    print(f"DEBUG: About to add node to graph...")
     graph.add_node(new_node)
     
-    print(f"DEBUG: About to calculate distances...")
     dist_u = point.distance(Point(node_u))
     dist_v = point.distance(Point(node_v))
-    print(f"DEBUG: Distances calculated: dist_u={dist_u}, dist_v={dist_v}")
-    
-    print(f"DEBUG: About to add edges...")
     graph.add_edge(node_u, new_node, weight=dist_u, geometry=LineString([Point(node_u), point]))
     graph.add_edge(new_node, node_v, weight=dist_v, geometry=LineString([point, Point(node_v)]))
     
-    print(f"DEBUG: add_point_to_graph returning: {new_node}")
     return new_node
 
 def calculate_shortest_path(graph, start_coords, end_coords):
     """Calculates the shortest path using a point-to-segment routing model."""
-    # print(f"DEBUG: calculate_shortest_path called with start_coords={start_coords}, end_coords={end_coords}")
     temp_graph = graph.copy()
 
-    # print("DEBUG: Finding start edge...")
     start_edge, start_snap = find_nearest_edge(temp_graph, Point(start_coords))
-    # print(f"DEBUG: Start edge found: {start_edge}, start_snap: {start_snap}")
     
-    # print("DEBUG: Finding end edge...")
     end_edge, end_snap = find_nearest_edge(temp_graph, Point(end_coords))
-    # print(f"DEBUG: End edge found: {end_edge}, end_snap: {end_snap}")
     
     if start_edge is None or end_edge is None:
         print("Error: Could not snap points to network.")
@@ -226,64 +185,50 @@ def calculate_shortest_path(graph, start_coords, end_coords):
 
     if start_edge == end_edge:
         print("--- Intra-edge route detected ---")
-        print(f"DEBUG: Processing intra-edge route...")
         # Fix: NetworkX expects graph.edges[u, v], not graph.edges[(u, v)]
         node_u, node_v = start_edge
-        line = temp_graph.edges[node_u, node_v]['geometry']
+        line = temp_graph[node_u][node_v][0]['geometry']  # MultiGraph: access first edge at index 0
         start_dist = line.project(start_snap)
         end_dist = line.project(end_snap)
         
-        print(f"DEBUG: About to create splitter...")
         splitter = MultiPoint([line.interpolate(start_dist), line.interpolate(end_dist)])
-        print(f"DEBUG: Splitter created: {splitter}")
         
         try:
-            print(f"DEBUG: About to split line...")
             parts = split(line, splitter)
-            print(f"DEBUG: Line split into {len(parts.geoms)} parts")
             
             for i, part in enumerate(parts.geoms):
-                print(f"DEBUG: Checking part {i}: distance to start={part.distance(start_snap)}, distance to end={part.distance(end_snap)}")
                 if part.distance(start_snap) < 1e-9 and part.distance(end_snap) < 1e-9:
                     result = (list(part.coords), part.length)
-                    print(f"DEBUG: Intra-edge route returning: {result}")
-                    print(f"DEBUG: Return type: {type(result)}, length: {len(result)}")
                     return result
         except Exception as e:
-            print(f"DEBUG: Exception in intra-edge route processing: {e}")
-            import traceback
-            traceback.print_exc()
             return None
+        return None
 
-    print(f"DEBUG: About to add points to graph...")
-    print(f"DEBUG: start_edge: {start_edge}, start_snap: {start_snap}")
     start_node = add_point_to_graph(temp_graph, start_snap, start_edge)
     end_node = add_point_to_graph(temp_graph, end_snap, end_edge)
 
-    print(f"DEBUG: Routing from new temporary node {start_node} to {end_node}")
-
     try:
-        print(f"DEBUG: About to find shortest path...")
         path_nodes = nx.shortest_path(temp_graph, source=start_node, target=end_node, weight='weight')
         path_length = nx.shortest_path_length(temp_graph, source=start_node, target=end_node, weight='weight')
-        print(f"DEBUG: Path found with {len(path_nodes)} nodes and length {path_length:.2f}m")
 
-        print(f"DEBUG: About to build route geometry...")
         route_geometry = []
         for i in range(len(path_nodes) - 1):
             u, v = path_nodes[i], path_nodes[i+1]
-            edge_data = temp_graph.get_edge_data(u, v)
+            edge_data = temp_graph.get_edge_data(u, v)[0]  # MultiGraph: access first edge at index 0
+            print(f"DEBUG: Edge {i}: u={u}, v={v}, edge_data={edge_data}")
             if 'geometry' in edge_data:
-                coords = list(edge_data['geometry'].coords)
+                coords = list(edge_data['geometry'].coords)  # Now we can access geometry directly
+                print(f"DEBUG: Got coords: {len(coords)} points")
                 if Point(coords[0]).distance(Point(u)) > Point(coords[-1]).distance(Point(u)):
                     coords.reverse()
                 if not route_geometry or coords[0] != route_geometry[-1]:
                     route_geometry.extend(coords)
                 else:
                     route_geometry.extend(coords[1:])
+            else:
+                print(f"DEBUG: No geometry found for edge {i}")
         
         result = (route_geometry, path_length)
-        print(f"DEBUG: Normal route returning: {type(result)}, length: {len(result)}")
         return result
     except nx.NetworkXNoPath:
         print("Error: No path could be found. The network may be disconnected.")
@@ -315,22 +260,13 @@ def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, ne
         network_graph, start_coords, end_coords
     )
     
-    print(f"DEBUG: calculate_shortest_path returned: {result}")
-    print(f"DEBUG: result type: {type(result)}")
-    if result is not None:
-        print(f"DEBUG: result length: {len(result)}")
-        print(f"DEBUG: result contents: {result}")
-    
     if result is None:
         print("=== Route Calculation Failed ===")
         return None, None, segments_loaded
     
     try:
         route_geometry, path_length = result
-        print(f"DEBUG: Successfully unpacked: route_geometry={type(route_geometry)}, path_length={type(path_length)}")
     except Exception as e:
-        print(f"DEBUG: Failed to unpack result: {e}")
-        print(f"DEBUG: result was: {result}")
         return None, None, segments_loaded
     
     if route_geometry:
