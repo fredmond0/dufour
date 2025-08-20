@@ -3,1925 +3,255 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Swiss TLM3D Route Planner</title>
+    <title>Swiss TLM3D Route Planner (Debug Interface)</title>
     
-    <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background-color: #f5f5f5;
-        }
-        
-        .container {
-            display: flex;
-            height: 100vh;
-        }
-        
-        .sidebar {
-            width: 350px;
-            background: white;
-            padding: 20px;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
-            overflow-y: auto;
-        }
-        
-        .map-container {
-            flex: 1;
-            position: relative;
-        }
-        
-        #map {
-            height: 100%;
-            width: 100%;
-        }
-        
-        .control-panel {
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .control-panel h3 {
-            margin-top: 0;
-            color: #333;
-            font-size: 18px;
-        }
-        
-        .point-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 10px 0;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .point-info.start {
-            border-left-color: #28a745;
-        }
-        
-        .point-info.end {
-            border-left-color: #dc3545;
-        }
-        
-        .coordinates {
-            font-family: monospace;
-            font-size: 12px;
-            color: #666;
-        }
-        
-        .btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            margin: 5px;
-            transition: background 0.3s;
-        }
-        
-        .btn:hover {
-            background: #0056b3;
-        }
-        
-        .btn:disabled {
-            background: #6c757d;
-            cursor: not-allowed;
-        }
-        
-        .btn.success {
-            background: #28a745;
-        }
-        
-        .btn.danger {
-            background: #dc3545;
-        }
-        
-        .btn.secondary {
-            background: #6c757d;
-        }
-        
-        .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        .status.info {
-            background: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-        }
-        
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .status.warning {
-            background: #fff3cd;
-            color: #856404;
-            border: 1px solid #ffeaa7;
-        }
-        
-        .buffer-control {
-            margin: 15px 0;
-        }
-        
-        .buffer-control label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-            color: #555;
-        }
-        
-        .buffer-control input[type="range"] {
-            width: 100%;
-            margin: 10px 0;
-        }
-        
-        .buffer-value {
-            text-align: center;
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .route-info {
-            background: #e9ecef;
-            padding: 15px;
-            border-radius: 4px;
-            margin-top: 15px;
-        }
-        
-        .route-info h4 {
-            margin-top: 0;
-            color: #495057;
-        }
-        
-        .routing-mode {
-            margin: 15px 0;
-            padding: 10px;
-            background: white;
-            border-radius: 4px;
-        }
-        
-        .routing-mode label {
-            margin-right: 15px;
-            cursor: pointer;
-        }
-        
-        .layer-controls {
-            margin: 15px 0;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border: 1px solid #dee2e6;
-        }
-        
-        .layer-controls h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #495057;
-            font-size: 14px;
-        }
-        
-        .layer-controls label {
-            display: block;
-            margin: 8px 0;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        
-        .network-selection {
-            margin: 15px 0;
-            padding: 10px;
-            background: #e8f5e8;
-            border-radius: 4px;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .network-selection h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #155724;
-            font-size: 14px;
-        }
-        
-        .network-selection label {
-            display: block;
-            margin: 8px 0;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        
-        .network-help {
-            margin-top: 10px;
-            padding: 8px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border-left: 3px solid #17a2b8;
-            font-size: 11px;
-            line-height: 1.4;
-        }
-        
-        .network-status {
-            margin: 10px 0;
-            padding: 10px;
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            border-radius: 4px;
-            text-align: center;
-            font-weight: bold;
-            color: #155724;
-        }
-        
-        .ski-route-popup {
-            font-family: Arial, sans-serif;
-        }
-        
-        .ski-route-popup h4 {
-            margin: 0 0 10px 0;
-            color: #0066cc;
-            font-size: 14px;
-        }
-        
-        .ski-route-popup p {
-            margin: 5px 0;
-            font-size: 12px;
-            color: #333;
-        }
-        
-        .bounding-box-control {
-            margin: 10px 0;
-            padding: 10px;
-            background: white;
-            border-radius: 4px;
-        }
-        
-        .bounding-box-control label {
-            cursor: pointer;
-        }
-        
-        .help-tip {
-            background: #e3f2fd;
-            border: 1px solid #2196f3;
-            border-radius: 6px;
-            padding: 8px 12px;
-            margin: 10px 0;
-            font-size: 13px;
-            color: #1565c0;
-        }
-        
-        .point-to-point-controls {
-            margin: 15px 0;
-            padding: 15px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            border: 1px solid #dee2e6;
-        }
-        
-        .multi-point-controls {
-            margin: 15px 0;
-            padding: 15px;
-            background: #fff3cd;
-            border-radius: 6px;
-            border: 1px solid #ffeaa7;
-        }
-        
-        .waypoints-list h4 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #856404;
-        }
-        
-        .waypoint-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 12px;
-            margin: 5px 0;
-            background: white;
-            border-radius: 4px;
-            border: 1px solid #ffeaa7;
-        }
-        
-        .waypoint-number {
-            background: #ffc107;
-            color: #000;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 12px;
-        }
-        
-        .waypoint-coords {
-            flex: 1;
-            margin: 0 10px;
-            font-size: 12px;
-            color: #666;
-        }
-        
-        .waypoint-remove {
-            background: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            padding: 4px 8px;
-            cursor: pointer;
-            font-size: 10px;
-        }
-        
-        .no-waypoints {
-            text-align: center;
-            color: #856404;
-            font-style: italic;
-            margin: 20px 0;
-        }
-        
-        .route-stats {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-top: 10px;
-        }
-        
-        .stat {
-            text-align: center;
-            padding: 10px;
-            background: white;
-            border-radius: 4px;
-        }
-        
-        .stat-value {
-            font-size: 18px;
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-        }
-        
-        .elevation-profile {
-            margin-top: 20px;
-            padding: 15px;
-            background: white;
-            border-radius: 4px;
-        }
-        
-        .elevation-profile h4 {
-            margin-top: 0;
-            margin-bottom: 15px;
-            color: #495057;
-        }
-        
-        #elevation-canvas {
-            width: 100%;
-            height: 200px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background: white;
-        }
-        
-        .elevation-legend {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 10px;
-            font-size: 12px;
-            color: #666;
-        }
-        
-        .waypoint-marker {
-            background: #ffc107;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            text-align: center;
-            line-height: 20px;
-            font-weight: bold;
-            color: #000;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-        
-        .profile-marker {
-            background: #dc3545;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            text-align: center;
-            line-height: 16px;
-            color: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-            z-index: 1000;
-        }
-        
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-        
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #007bff;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; display: flex; height: 100vh; }
+        .sidebar { width: 350px; background: white; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; }
+        .map-container { flex: 1; }
+        #map { height: 100%; width: 100%; }
+        .control-panel { padding: 15px; background: #f8f9fa; border-radius: 5px; margin-bottom: 15px; }
+        h3, h4 { margin-top: 0; }
+        .btn { display: block; width: 100%; background: #007bff; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        .btn:disabled { background: #6c757d; cursor: not-allowed; }
+        .btn-secondary { background: #6c757d; }
+        .coordinates { font-family: monospace; font-size: 12px; color: #666; padding: 5px 0; }
+        .status { padding: 10px; margin-top: 15px; border-radius: 4px; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .route-info { background: #e9ecef; padding: 15px; border-radius: 4px; margin-top: 15px; display: none; }
+        .loading { display: none; text-align: center; padding: 20px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="sidebar">
-            <div class="control-panel">
-                <h3>🚗 Swiss TLM3D Route Planner</h3>
-                <p>Click on the map to set start and end points, then calculate your route.</p>
-                <p><small>🗺️ Use the layer control (top right) to switch between map styles</small></p>
-                
+    <div class="sidebar">
+        <h3>📍 Route Planner</h3>
+        <p>Use the layer control in the top right of the map to change base maps and toggle overlays.</p>
 
-                
-                <div class="routing-mode">
-                    <label>
-                        <input type="radio" name="routing-mode" value="single" checked> Point to Point
-                    </label>
-                    <label>
-                        <input type="radio" name="routing-mode" value="multi"> Multi-Point Route
-                    </label>
-                </div>
-                
-                <div class="help-tip">
-                    💡 <strong>Tip:</strong> Click anywhere along a road - you don't need to click exactly at junctions!
-                </div>
-                
-                <div id="network-status" class="network-status">
-                    <span id="current-network">🚗 TLM3D Network Selected</span>
-                </div>
-                
-                <div class="layer-controls">
-                    <h4>🗺️ Map Layers</h4>
-                    <label>
-                        <input type="checkbox" id="showSkiRoutes" checked> 🎿 Show Ski Touring Routes
-                    </label>
-                    <label>
-                        <input type="checkbox" id="showBoundingBox"> 📦 Show Bounding Box
-                    </label>
-                </div>
-                
-                <div class="network-selection">
-                    <h4>🛤️ Routing Network</h4>
-                    <label>
-                        <input type="radio" name="network-type" value="tlm3d" checked> 🚗 TLM3D (Roads & Trails)
-                    </label>
-                    <label>
-                        <input type="radio" name="network-type" value="ski_touring"> 🎿 Ski Touring Routes
-                    </label>
-                    <div class="network-help">
-                        <small>
-                            <strong>TLM3D:</strong> Roads, hiking trails, and paths<br>
-                            <strong>Ski Touring:</strong> Dedicated ski routes only
-                        </small>
-                    </div>
-                </div>
-                
-                <!-- Point to Point Controls (only visible in single mode) -->
-                <div id="point-to-point-controls" class="point-to-point-controls">
-                    <div class="point-inputs">
-                        <div class="point-input">
-                            <label>Start Point:</label>
-                            <div class="coordinates" id="start-coords">Not set</div>
-                            <button class="btn btn-secondary" onclick="clearPoint('start')">Clear</button>
-                        </div>
-                        
-                        <div class="point-input">
-                            <label>End Point:</label>
-                            <div class="coordinates" id="end-coords">Not set</div>
-                            <button class="btn btn-secondary" onclick="clearPoint('end')">Clear</button>
-                        </div>
-                        
-                        <button class="btn" id="calculate-btn" onclick="calculateRoute()" disabled>
-                            🧮 Calculate Route
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Multi-Point Controls (only visible in multi mode) -->
-                <div id="multi-point-controls" class="multi-point-controls" style="display: none;">
-                    <div class="waypoints-list">
-                        <h4>🗺️ Waypoints</h4>
-                        <div id="waypoints-container">
-                            <p class="no-waypoints">Click on the map to add waypoints</p>
-                        </div>
-                    </div>
-                    
-                    <button class="btn btn-secondary" onclick="clearAll()">
-                        🗑️ Clear All Waypoints
-                    </button>
-                </div>
-                
-                <div class="buffer-control">
-                    <label for="buffer-slider">Buffer Distance: <span id="buffer-value">2.0</span> km</label>
-                    <input type="range" id="buffer-slider" min="0.5" max="20" step="0.1" value="2">
-                    <div class="buffer-value">Adjust clipping area size</div>
-                </div>
-                
-                <div class="bounding-box-control">
-                    <label>
-                        <input type="checkbox" id="show-bbox"> Show Bounding Box
-                    </label>
-                </div>
-                
-                <button class="btn btn-secondary" onclick="clearRoute()">
-                    🗑️ Clear Route
-                </button>
-                
-                <button class="btn btn-secondary" id="export-gpx-btn" onclick="exportToGPX()" style="display: none;">
-                    📍 Export GPX
-                </button>
-                
+        <div class="control-panel">
+            <h4>Points</h4>
+            <div>Start: <span class="coordinates" id="start-coords">Not set</span></div>
+            <div>End: <span class="coordinates" id="end-coords">Not set</span></div>
+        </div>
 
-            </div>
-            
-            <div id="status-container"></div>
-            
-            <div id="route-info" class="route-info" style="display: none;">
-                <h4>📊 Route Information</h4>
-                <div class="route-stats">
-                    <div class="stat">
-                        <div class="stat-value" id="route-length">-</div>
-                        <div class="stat-label">Distance (km)</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-value" id="route-nodes">-</div>
-                        <div class="stat-label">Waypoints</div>
-                    </div>
-                </div>
-                <div class="route-stats">
-                    <div class="stat">
-                        <div class="stat-value" id="buffer-size">-</div>
-                        <div class="stat-label">Buffer (km)</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-value" id="segments-loaded">-</div>
-                        <div class="stat-label">Segments Loaded</div>
-                    </div>
-                </div>
-                <div class="route-stats">
-                    <div class="stat">
-                        <div class="stat-value" id="elevation-gain">-</div>
-                        <div class="stat-label">Elevation Gain (m)</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-value" id="elevation-loss">-</div>
-                        <div class="stat-label">Elevation Loss (m)</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div id="elevation-profile" class="elevation-profile" style="display: none;">
-                <h4>🏔️ Elevation Profile</h4>
-                <canvas id="elevation-canvas" width="400" height="200"></canvas>
-                <div class="elevation-legend">
-                    <span>Distance (km) →</span>
-                    <span>↑ Elevation (m)</span>
-                </div>
-            </div>
-            
-            <div id="loading" class="loading">
-                <div class="spinner"></div>
-                <div>Calculating route...</div>
-            </div>
+        <div class="control-panel">
+            <h4>Network</h4>
+            <label><input type="radio" name="network-type" value="ski_touring" checked> 🎿 Ski Touring (Available)</label><br>
+            <label><input type="radio" name="network-type" value="tlm3d" disabled> 🚗 TLM3D (Not Available Yet)</label>
+            <small style="color: #666; display: block; margin-top: 5px;">TLM3D routing will be available after preprocessing the road network data.</small>
+        </div>
+
+        <div class="control-panel">
+            <label for="buffer-slider">Buffer: <span id="buffer-value">5.0</span> km</label>
+            <input type="range" id="buffer-slider" min="0.5" max="20" step="0.1" value="5">
         </div>
         
-        <div class="map-container">
-            <div id="map"></div>
+        <button class="btn" id="calculate-btn" onclick="calculateRoute()" disabled>Calculate Route</button>
+        <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <div>Calculating...</div>
+        </div>
+        
+        <div id="status-container"></div>
+        
+        <div id="route-info" class="route-info">
+            <h4>📊 Route Info</h4>
+            <div><strong>Distance:</strong> <span id="route-length">-</span> km</div>
+            <div><strong>Segments Loaded:</strong> <span id="segments-loaded">-</span></div>
+            <div><strong>Buffer Used:</strong> <span id="buffer-size">-</span> km</div>
         </div>
     </div>
-
-    <!-- Leaflet JavaScript -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <!-- Leaflet.TileLayer.Swiss for official Swisstopo maps -->
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-tilelayer-swiss@2.3.0/dist/Leaflet.TileLayer.Swiss.umd.js"></script>
     
     <script>
-        // Global variables
+        // --- Global State ---
         let map;
         let startMarker = null;
         let endMarker = null;
-        let routeLine = null;
-        let routeCasing = null;  // Store reference to route casing
-        let clippedAreaPolygon = null;
+        let routeLayer = null;
         let startPoint = null;
         let endPoint = null;
-        let waypoints = []; // Array of waypoints for multi-point routing
-        let waypointMarkers = []; // Array of waypoint markers on map
-        let bufferDistance = 2.0; // km - reduced default for closer routing
-        let showBoundingBox = false; // Default: bounding box hidden
-        
-        // Initialize the map
+
+        // --- Map Initialization ---
         function initMap() {
-            // Create map with Swiss LV95 projection
-            map = L.map('map', {
-                crs: L.CRS.EPSG2056
-            });
-            // Dedicated pane so ski routes render on top of other overlays
-            map.createPane('skiRoutesPane');
-            map.getPane('skiRoutesPane').style.zIndex = 650;
-            map.getPane('skiRoutesPane').style.pointerEvents = 'none';
-            
-            // Medium z-index pane for route lines so they appear above ski routes but below markers
-            map.createPane('routePane');
-            map.getPane('routePane').style.zIndex = 675;
-            
-            // High z-index pane for markers so they appear above everything
-            map.createPane('markersPane');
-            map.getPane('markersPane').style.zIndex = 700;
-            
-            // Add Swiss topographic maps
-            const swissTopo = L.tileLayer.swiss();
+            // --- 1. Define Base Map Layers ---
+            const swissWinter = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-farbe-winter' });
+            const swissColor = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-farbe' });
             const swissGrey = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-grau' });
-            const swissOrtho = L.tileLayer.swiss({ layer: 'ch.swisstopo.swissimage' });
+
+            // --- 2. Define Overlay Layers ---
+            const slopeAngles = L.tileLayer.swiss({
+                layer: 'ch.swisstopo.hangneigung-ueber_30',
+                format: 'png',
+                opacity: 0.5
+            });
+
+            const hikingTrails = L.tileLayer.swiss({
+                layer: 'ch.swisstopo.swisstlm3d-wanderwege',
+                format: 'png',
+                opacity: 0.8
+            });
             
-            // Add layer control
-            const baseMaps = {
-                "Swisstopo Color": swissTopo,
-                "Swisstopo Grey": swissGrey,
-                "Swisstopo Ortho": swissOrtho
-            };
-            
-            L.control.layers(baseMaps).addTo(map);
-            swissTopo.addTo(map);
-            
-            // Center on Switzerland
+            // --- NEW: Add the official ski touring routes overlay ---
+            const skiTouringRoutes = L.tileLayer.swiss({
+                layer: 'ch.swisstopo-karto.skitouren', // Layer name for official ski routes
+                format: 'png',
+                opacity: 0.8
+            });
+
+            // --- 3. Create the map with a default base layer ---
+            map = L.map('map', {
+                crs: L.CRS.EPSG2056,
+                layers: [swissWinter]
+            });
             map.fitSwitzerland();
-            
-            // Add click event and initialize UI
             map.on('click', onMapClick);
-            initUI();
-            
-            // Load ski touring routes
-            loadSkiTouringRoutes();
-        }
-        
-        // Load and display ski touring routes
-        function loadSkiTouringRoutes() {
-            console.log('Loading ski touring routes...');
-            
-            fetch('/get_ski_routes')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.features && data.features.length > 0) {
-                        console.log(`Loaded ${data.features.length} ski touring routes`);
-                        displaySkiTouringRoutes(data);
-                    } else {
-                        console.log('No ski touring routes found');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error loading ski touring routes:', error);
-                });
-        }
-        
-        // Display ski touring routes on the map
-        function displaySkiTouringRoutes(routesData) {
-            // Remove existing ski routes if any
-            if (window.skiRoutesLayer) {
-                map.removeLayer(window.skiRoutesLayer);
-            }
-            
-            // Create a new layer group for ski routes
-            window.skiRoutesLayer = L.layerGroup();
 
-            // Helper to add a bold, double-stroked ski route polyline
-            function addSkiPolyline(latLngCoords) {
-                // Outer casing for contrast
-                const casing = L.polyline(latLngCoords, {
-                    color: '#ffffff',
-                    weight: 9,
-                    opacity: 0.9,
-                    pane: 'skiRoutesPane'
-                });
-                // Main blue stroke
-                const main = L.polyline(latLngCoords, {
-                    color: '#0066ff',
-                    weight: 6,
-                    opacity: 1.0,
-                    pane: 'skiRoutesPane'
-                });
-                window.skiRoutesLayer.addLayer(casing);
-                window.skiRoutesLayer.addLayer(main);
-            }
-            
-            routesData.features.forEach(feature => {
-                if (!feature.geometry) return;
-
-                const type = feature.geometry.type;
-                const coords = feature.geometry.coordinates;
-
-                // Popup (bind to last segment drawn)
-                const popupContent = `
-                    <div class="ski-route-popup">
-                        <h4>🎿 ${feature.properties?.name_de || feature.properties?.name || 'Ski Route'}</h4>
-                        ${feature.properties?.difficulty_de ? `<p><strong>Difficulty:</strong> ${feature.properties.difficulty_de}</p>` : ''}
-                        ${feature.properties?.ascent_time ? `<p><strong>Ascent Time:</strong> ${feature.properties.ascent_time} min</p>` : ''}
-                        ${feature.properties?.target_altitude ? `<p><strong>Peak Altitude:</strong> ${feature.properties.target_altitude}m</p>` : ''}
-                    </div>
-                `;
-
-                if (type === 'LineString') {
-                    const latLngCoords = coords.map(coord => {
-                        const p = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
-                        return [p.lat, p.lng];
-                    });
-                    addSkiPolyline(latLngCoords);
-                } else if (type === 'MultiLineString') {
-                    coords.forEach(part => {
-                        const latLngCoords = part.map(coord => {
-                            const p = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
-                            return [p.lat, p.lng];
-                        });
-                        addSkiPolyline(latLngCoords);
-                    });
-                }
-            });
-            
-            // Add ski routes layer to map
-            window.skiRoutesLayer.addTo(map);
-            
-            // Update layer control
-            updateLayerVisibility();
-        }
-        
-        // Update layer visibility based on checkbox states
-        function updateLayerVisibility() {
-            const showSkiRoutes = document.getElementById('showSkiRoutes').checked;
-            const showBoundingBox = document.getElementById('showBoundingBox').checked;
-            
-            if (window.skiRoutesLayer) {
-                if (showSkiRoutes) {
-                    if (!map.hasLayer(window.skiRoutesLayer)) {
-                        map.addLayer(window.skiRoutesLayer);
-                    }
-                } else {
-                    if (map.hasLayer(window.skiRoutesLayer)) {
-                        map.removeLayer(window.skiRoutesLayer);
-                    }
-                }
-            }
-            
-            if (window.boundingBoxLayer) {
-                if (showBoundingBox) {
-                    if (!map.hasLayer(window.boundingBoxLayer)) {
-                        map.addLayer(window.boundingBoxLayer);
-                    }
-                } else {
-                    if (map.hasLayer(window.boundingBoxLayer)) {
-                        map.removeLayer(window.boundingBoxLayer);
-                    }
-                }
-            }
-        }
-        
-        // Update network status display
-        function updateNetworkStatus() {
-            const selectedNetwork = document.querySelector('input[name="network-type"]:checked').value;
-            const statusElement = document.getElementById('current-network');
-            
-            if (selectedNetwork === 'tlm3d') {
-                statusElement.textContent = '🚗 TLM3D Network Selected (Roads & Trails)';
-                statusElement.parentElement.style.background = '#d4edda';
-                statusElement.parentElement.style.borderColor = '#c3e6cb';
-                statusElement.parentElement.style.color = '#155724';
-            } else if (selectedNetwork === 'ski_touring') {
-                statusElement.textContent = '🎿 Ski Touring Network Selected';
-                statusElement.parentElement.style.background = '#cce5ff';
-                statusElement.parentElement.style.borderColor = '#b3d7ff';
-                statusElement.parentElement.style.color = '#004085';
-            }
-        }
-        
-        // Initialize UI components
-        function initUI() {
-            document.getElementById('buffer-slider').addEventListener('input', function(e) {
-                bufferDistance = parseFloat(e.target.value);
-                document.getElementById('buffer-value').textContent = bufferDistance.toFixed(1);
-                if (startPoint && endPoint) {
-                    updateClippedArea();
-                }
-            });
-            
-            // Add event listeners for layer controls
-            document.getElementById('showSkiRoutes').addEventListener('change', updateLayerVisibility);
-            document.getElementById('showBoundingBox').addEventListener('change', updateLayerVisibility);
-            
-            // Add event listeners for network type selection
-            document.querySelectorAll('input[name="network-type"]').forEach(radio => {
-                radio.addEventListener('change', updateNetworkStatus);
-            });
-            
-            // Initialize network status
-            updateNetworkStatus();
-        }
-        
-        // Handle map clicks - send WGS84 coordinates to backend
-        function onMapClick(e) {
-            // Use Leaflet's built-in coordinate transformation properly
-            console.log(`=== Map Click Debug ===`);
-            console.log(`Raw latlng:`, e.latlng);
-            console.log(`Map CRS:`, map.options.crs);
-            
-            // Store the original click coordinates for marker placement
-            const originalLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
-            
-            // For the backend, we'll send WGS84 coordinates (latitude/longitude)
-            // The backend will handle the projection to Swiss LV95
-            const wgs84Coords = { lat: e.latlng.lat, lng: e.latlng.lng };
-            
-            console.log(`✅ Sending WGS84 coordinates to backend: (${wgs84Coords.lat}, ${wgs84Coords.lng})`);
-            
-            // Check current routing mode
-            const isMultiPoint = document.querySelector('input[name="routing-mode"][value="multi"]').checked;
-            
-            if (isMultiPoint) {
-                // Multi-point routing mode
-                handleMultiPointClick(wgs84Coords, originalLatLng);
-            } else {
-                // Single route mode (original functionality)
-                handleSingleRouteClick(wgs84Coords, originalLatLng);
-            }
-        }
-        
-        // Handle clicks in single route mode
-        function handleSingleRouteClick(wgs84Coords, originalLatLng) {
-            // Check if we're clicking too close to existing points
-            if (startPoint && isTooClose(wgs84Coords.lat, wgs84Coords.lng, startPoint.lat, startPoint.lng)) {
-                showStatus('Click further away from the start point', 'warning');
-                return;
-            }
-            
-            if (endPoint && isTooClose(wgs84Coords.lat, wgs84Coords.lng, endPoint.lat, endPoint.lng)) {
-                showStatus('Click further away from the end point', 'warning');
-                return;
-            }
-            
-            // Set the point
-            if (!startPoint) {
-                setStartPoint(wgs84Coords, originalLatLng);
-                showStatus('Start point set! Now click for end point', 'success');
-            } else if (!endPoint) {
-                setEndPoint(wgs84Coords, originalLatLng);
-                showStatus('End point set! Click "Calculate Route" to find the path', 'success');
-            } else {
-                // Both points set, ask user what to do
-                if (confirm('Both start and end points are set. Click "OK" to set a new start point, or "Cancel" to set a new end point.')) {
-                    clearPoint('start');
-                    setStartPoint(wgs84Coords, originalLatLng);
-                } else {
-                    clearPoint('end');
-                    setEndPoint(wgs84Coords, originalLatLng);
-                }
-            }
-        }
-        
-        // Handle clicks in multi-point mode
-        function handleMultiPointClick(wgs84Coords, originalLatLng) {
-            // Check if we're clicking too close to existing waypoints
-            for (let waypoint of waypoints) {
-                if (isTooClose(wgs84Coords.lat, wgs84Coords.lng, waypoint.lat, waypoint.lng)) {
-                    showStatus('Click further away from existing waypoints', 'warning');
-                    return;
-                }
-            }
-            
-            // Add new waypoint
-            const waypoint = {
-                lat: wgs84Coords.lat,
-                lng: wgs84Coords.lng,
-                marker: null
+            // --- 4. Create Layer Control Objects ---
+            const baseMaps = {
+                "Winter Map": swissWinter,
+                "Color Map": swissColor,
+                "Grey Map": swissGrey
             };
+
+            const overlayMaps = {
+                "Slope > 30°": slopeAngles,
+                "Marked Trails": hikingTrails,
+                "Official Ski Routes": skiTouringRoutes // Add new layer to the control
+            };
+
+            // --- 5. Add the Layer Control to the map ---
+            L.control.layers(baseMaps, overlayMaps).addTo(map);
             
-            waypoints.push(waypoint);
-            
-            // Create draggable marker for this waypoint
-            const marker = L.marker([originalLatLng.lat, originalLatLng.lng], {
-                icon: L.divIcon({
-                    className: 'waypoint-marker',
-                    html: `${waypoints.length}`,
-                    iconSize: [24, 24]
-                }),
-                draggable: true,
-                pane: 'markersPane'
-            }).addTo(map);
-            
-            // Store marker reference
-            waypoint.marker = marker;
-            waypointMarkers.push(marker);
-            
-            // Add drag event handlers
-            marker.on('dragend', function(e) {
-                const newLatLng = e.target.getLatLng();
-                
-                // Update waypoint coordinates
-                waypoint.lat = newLatLng.lat;
-                waypoint.lng = newLatLng.lng;
-                
-                // Update waypoints display
-                updateWaypointsDisplay();
-                
-                // Recalculate route if we have at least 2 waypoints
-                if (waypoints.length >= 2) {
-                    calculateMultiPointRoute();
-                }
-                
-                showStatus(`Waypoint ${waypoints.indexOf(waypoint) + 1} moved. Route updated!`, 'success');
+            // --- 6. Add event listener for buffer slider ---
+            document.getElementById('buffer-slider').addEventListener('input', (e) => {
+                document.getElementById('buffer-value').textContent = parseFloat(e.target.value).toFixed(1);
             });
-            
-            // Update waypoints display
-            updateWaypointsDisplay();
-            
-            // If we have at least 2 waypoints, calculate and display route
-            if (waypoints.length >= 2) {
-                calculateMultiPointRoute();
+        }
+
+        // --- User Interaction ---
+        function onMapClick(e) {
+            if (!startPoint) {
+                setPoint('start', e.latlng);
+            } else if (!endPoint) {
+                setPoint('end', e.latlng);
             }
-            
-            showStatus(`Waypoint ${waypoints.length} added! Route will update automatically.`, 'success');
         }
         
-        // Check if two points are too close (less than 100m = 0.1km)
-        function isTooClose(lat1, lng1, lat2, lng2) {
-            // Calculate distance in degrees (approximate)
-            const latDiff = lat1 - lat2;
-            const lngDiff = lng1 - lng2;
-            const distance = Math.sqrt(latDiff**2 + lngDiff**2);
-            return distance < 0.001; // Roughly 100m in degrees
-        }
-        
-        // Set start point
-        function setStartPoint(wgs84Coords, originalLatLng) {
-            startPoint = { lat: wgs84Coords.lat, lng: wgs84Coords.lng };
-            
-            // Remove existing start marker
-            if (startMarker) {
-                map.removeLayer(startMarker);
-            }
-            
-            // Use the original click coordinates for marker placement
-            startMarker = L.marker([originalLatLng.lat, originalLatLng.lng], {
-                icon: L.divIcon({
-                    className: 'start-marker',
-                    html: '🟢',
-                    iconSize: [20, 20]
-                }),
-                pane: 'markersPane'
-            }).addTo(map);
-            
-            // Update UI - show WGS84 coordinates
-            document.getElementById('start-coords').textContent = 
-                `WGS84: (${wgs84Coords.lat.toFixed(6)}, ${wgs84Coords.lng.toFixed(6)})`;
-            
-            updateCalculateButton();
-            updateClippedArea();
-        }
-        
-        // Set end point
-        function setEndPoint(wgs84Coords, originalLatLng) {
-            endPoint = { lat: wgs84Coords.lat, lng: wgs84Coords.lng };
-            
-            // Remove existing end marker
-            if (endMarker) {
-                map.removeLayer(endMarker);
-            }
-            
-            // Use the original click coordinates for marker placement
-            endMarker = L.marker([originalLatLng.lat, originalLatLng.lng], {
-                icon: L.divIcon({
-                    className: 'end-marker',
-                    html: '🔴',
-                    iconSize: [20, 20]
-                }),
-                pane: 'markersPane'
-            }).addTo(map);
-            
-            // Update UI - show WGS84 coordinates
-            document.getElementById('end-coords').textContent = 
-                `WGS84: (${wgs84Coords.lat.toFixed(6)}, ${wgs84Coords.lng.toFixed(6)})`;
-            
-            updateCalculateButton();
-            updateClippedArea();
-        }
-        
-        // Clear a specific point
-        function clearPoint(type) {
+        function setPoint(type, latlng) {
+            const marker = L.marker(latlng, { draggable: true }).addTo(map);
             if (type === 'start') {
-                if (startMarker) {
-                    map.removeLayer(startMarker);
-                    startMarker = null;
-                }
-                startPoint = null;
-                document.getElementById('start-coords').textContent = 'Not set';
-            } else if (type === 'end') {
-                if (endMarker) {
-                    map.removeLayer(endMarker);
-                    endMarker = null;
-                }
-                endPoint = null;
-                document.getElementById('end-coords').textContent = 'Not set';
-            }
-            
-            updateCalculateButton();
-            updateClippedArea();
-        }
-        
-        // Update calculate button state
-        function updateCalculateButton() {
-            const btn = document.getElementById('calculate-btn');
-            if (startPoint && endPoint) {
-                btn.disabled = false;
-                btn.textContent = '🧮 Calculate Route';
+                startPoint = latlng;
+                startMarker = marker;
+                marker.on('dragend', (e) => { startPoint = e.target.getLatLng(); updateCoordsDisplay(); });
             } else {
-                btn.disabled = true;
-                btn.textContent = '🧮 Calculate Route (Set both points)';
+                endPoint = latlng;
+                endMarker = marker;
+                marker.on('dragend', (e) => { endPoint = e.target.getLatLng(); updateCoordsDisplay(); });
             }
+            updateCoordsDisplay();
+            updateCalculateButton();
         }
         
-        // Update clipped area visualization
-        function updateClippedArea() {
-            if (!startPoint || !endPoint) {
-                if (clippedAreaPolygon) {
-                    map.removeLayer(clippedAreaPolygon);
-                    clippedAreaPolygon = null;
-                }
-                return;
-            }
-            
-            // Check if bounding box should be shown
-            if (!showBoundingBox) {
-                if (clippedAreaPolygon) {
-                    map.removeLayer(clippedAreaPolygon);
-                    clippedAreaPolygon = null;
-                }
-                return;
-            }
-            
-            // Remove existing clipped area
-            if (clippedAreaPolygon) {
-                map.removeLayer(clippedAreaPolygon);
-            }
-            
-            // Calculate bounding box with buffer around the route
-            // Since we're working with WGS84 coordinates, we'll create a simple bounding box
-            const bufferDegrees = (bufferDistance * 1000) / 111000; // Rough conversion: 1 degree ≈ 111km
-            
-            const minLat = Math.min(startPoint.lat, endPoint.lat) - bufferDegrees;
-            const maxLat = Math.max(startPoint.lat, endPoint.lat) + bufferDegrees;
-            const minLng = Math.min(startPoint.lng, endPoint.lng) - bufferDegrees;
-            const maxLng = Math.max(startPoint.lng, endPoint.lng) + bufferDegrees;
-            
-            // Create bounding box coordinates
-            const boundsLatLng = [
-                [minLat, minLng], // bottom-left
-                [minLat, maxLng], // bottom-right
-                [maxLat, maxLng], // top-right
-                [maxLat, minLng]  // top-left
-            ];
-            
-            clippedAreaPolygon = L.polygon(boundsLatLng, {
-                color: '#007bff',
-                weight: 3,
-                fillColor: '#007bff',
-                fillOpacity: 0.15,
-                smoothFactor: 0,
-                lineCap: 'round',
-                lineJoin: 'round',
-                renderer: L.canvas()
-            }).addTo(map);
-            
-            // Fit map to show the clipped area
-            map.fitBounds(boundsLatLng, { padding: [20, 20] });
-        }
-        
-        // Calculate route (single route mode)
+        // --- Backend Communication ---
         async function calculateRoute() {
-            if (!startPoint || !endPoint) {
-                showStatus('Please set both start and end points first.', 'warning');
-                return;
-            }
-            
-            showStatus('Calculating route...', 'info');
+            if (!startPoint || !endPoint) return;
             showLoading(true);
-            
+            clearRoute();
             try {
-                // Get selected network type
                 const networkType = document.querySelector('input[name="network-type"]:checked').value;
-                
-                // Prepare data for backend - send WGS84 coordinates
-                const routeData = {
-                    start_coords: [startPoint.lat, startPoint.lng], // WGS84: [latitude, longitude]
-                    end_coords: [endPoint.lat, endPoint.lng],       // WGS84: [latitude, longitude]
-                    buffer_distance: bufferDistance * 1000, // Convert to meters
-                    network_type: networkType
-                };
-                
-                console.log('Sending WGS84 coordinates to backend:', routeData);
-                console.log('Start point (WGS84):', startPoint);
-                console.log('End point (WGS84):', endPoint);
-                
-                // Call Python backend
+                const bufferDistance = parseFloat(document.getElementById('buffer-slider').value) * 1000;
                 const response = await fetch('/calculate_route', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(routeData)
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_coords: [startPoint.lat, startPoint.lng],
+                        end_coords: [endPoint.lat, endPoint.lng],
+                        buffer_distance: bufferDistance,
+                        network_type: networkType
+                    })
                 });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
                 const result = await response.json();
-                
-                if (result.success) {
-                    displayRoute(result.route, result.path_length, result.segments_loaded);
+                if (result.success && result.route) {
+                    displayRoute(result);
                     showStatus('Route calculated successfully!', 'success');
                 } else {
-                    throw new Error(result.error || 'Route calculation failed');
+                    throw new Error(result.error || 'No route found.');
                 }
-                
             } catch (error) {
-                console.error('Error calculating route:', error);
                 showStatus(`Error: ${error.message}`, 'error');
             } finally {
                 showLoading(false);
             }
         }
-        
-        // Calculate multi-point route
-        async function calculateMultiPointRoute() {
-            if (waypoints.length < 2) {
-                return; // Need at least 2 waypoints
-            }
-            
-            showStatus('Calculating multi-point route...', 'info');
-            showLoading(true);
-            
-            try {
-                // For now, we'll calculate route between consecutive waypoints
-                // In the future, this could be optimized to calculate the entire route at once
-                let totalRoute = [];
-                let totalLength = 0;
-                let totalRoadsLoaded = 0;
-                
-                // Calculate route between each pair of consecutive waypoints
-                for (let i = 0; i < waypoints.length - 1; i++) {
-                    const start = waypoints[i];
-                    const end = waypoints[i + 1];
-                    
-                    // Get selected network type
-                    const networkType = document.querySelector('input[name="network-type"]:checked').value;
-                    
-                    // Send WGS84 coordinates to backend
-                    const routeData = {
-                        start_coords: [start.lat, start.lng], // WGS84: [latitude, longitude]
-                        end_coords: [end.lat, end.lng],       // WGS84: [latitude, longitude]
-                        buffer_distance: bufferDistance * 1000,
-                        network_type: networkType
-                    };
-                    
-                    const response = await fetch('/calculate_route', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify(routeData)
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        // Combine route segments
-                        if (totalRoute.length > 0) {
-                            // Remove first point of this segment to avoid duplication
-                            totalRoute = totalRoute.concat(result.route.slice(1));
-                        } else {
-                            totalRoute = result.route;
-                        }
-                        totalLength += result.path_length;
-                        totalRoadsLoaded += result.segments_loaded || 0;
-                    } else {
-                        throw new Error(result.error || 'Route calculation failed');
-                    }
-                }
-                
-                // Display the combined route
-                displayRoute(totalRoute, totalLength, totalRoadsLoaded);
-                showStatus('Multi-point route calculated successfully!', 'success');
-                
-            } catch (error) {
-                console.error('Error calculating multi-point route:', error);
-                showStatus(`Error: ${error.message}`, 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        // Display the calculated route
-        function displayRoute(route, pathLength, segmentsLoaded) {
-            // Remove existing route
-            if (routeLine) {
-                map.removeLayer(routeLine);
-            }
-            
-            // Convert LV95 coordinates back to lat/lng using proper CRS transformation
-            const routeLatLng = route.map(coord => {
-                const projected = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
-                return [projected.lng, projected.lat];
+
+        // --- UI Updates & Display ---
+        function displayRoute(result) {
+            const routeLatLngs = result.route.map(coord => {
+                const point = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                return [point.lat, point.lng];
             });
-            
-            console.log('Displaying route with coordinates:', routeLatLng);
-            console.log('Route coordinates count:', routeLatLng.length);
-            console.log('Route bounds:', routeLatLng);
-            
-            // Draw route line with maximum quality and precision
-            // First add a white casing for better visibility
-            routeCasing = L.polyline(routeLatLng, {
-                color: '#ffffff',
-                weight: 12,          // White casing around the route
-                opacity: 1.0,
-                smoothFactor: 0,
-                lineCap: 'round',
-                lineJoin: 'round',
-                renderer: L.canvas(),
-                pane: 'routePane'
-            }).addTo(map);
-            
-            // Then the main route line
-            routeLine = L.polyline(routeLatLng, {
-                color: '#ff6600',    // Bright orange for high visibility
-                weight: 8,           // Main route line
-                opacity: 1.0,        // Full opacity
-                smoothFactor: 0,     // Set to 0 for maximum precision - draw through every single waypoint
-                lineCap: 'round',    // Rounded line ends
-                lineJoin: 'round',   // Rounded line joins
-                renderer: L.canvas(), // Use canvas renderer for better quality with many points
-                pane: 'routePane'    // Medium z-index so route appears above ski routes but below markers
-            }).addTo(map);
-            
-            // Fit map to show the entire route
-            map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
-            
-            // Update route info
+            routeLayer = L.layerGroup().addTo(map);
+            L.polyline(routeLatLngs, { color: 'white', weight: 8, opacity: 0.8 }).addTo(routeLayer);
+            L.polyline(routeLatLngs, { color: '#ff6600', weight: 5 }).addTo(routeLayer);
+            map.fitBounds(L.polyline(routeLatLngs).getBounds(), { padding: [50, 50] });
             document.getElementById('route-info').style.display = 'block';
-            document.getElementById('route-length').textContent = (pathLength / 1000).toFixed(2);
-            document.getElementById('route-nodes').textContent = route.length;
-            document.getElementById('buffer-size').textContent = bufferDistance.toFixed(1);
-            document.getElementById('segments-loaded').textContent = segmentsLoaded || 'N/A';
-            
-            // Update route display controls
-            updateRouteDisplay();
-            
-            // Generate and display elevation profile
-            const profileData = generateElevationProfile(routeLatLng);
-            drawElevationProfile(profileData);
+            document.getElementById('route-length').textContent = (result.path_length / 1000).toFixed(2);
+            document.getElementById('segments-loaded').textContent = result.segments_loaded;
+            document.getElementById('buffer-size').textContent = (result.buffer_distance / 1000).toFixed(1);
         }
-        
-        // Clear route
-        function clearRoute() {
-            if (routeLine) {
-                map.removeLayer(routeLine);
-                routeLine = null;
-            }
-            if (routeCasing) {
-                map.removeLayer(routeCasing);
-                routeCasing = null;
-            }
-            document.getElementById('route-info').style.display = 'none';
-            document.getElementById('elevation-profile').style.display = 'none';
-            updateRouteDisplay(); // Hide GPX export button
-        }
-        
-        // Clear all
+
         function clearAll() {
-            clearPoint('start');
-            clearPoint('end');
             clearRoute();
-            
-            // Clear waypoints
-            waypoints.forEach(waypoint => {
-                if (waypoint.marker) {
-                    map.removeLayer(waypoint.marker);
-                }
-            });
-            waypoints = [];
-            waypointMarkers = [];
-            
-            if (clippedAreaPolygon) {
-                map.removeLayer(clippedAreaPolygon);
-                clippedAreaPolygon = null;
-            }
-            
-            // Update UI
-            updateStartEndDisplay();
-            updateWaypointsDisplay();
-            
-            showStatus('All data cleared.', 'info');
-        }
-        
-        // Show status message
-        function showStatus(message, type = 'info') {
-            const container = document.getElementById('status-container');
-            const statusDiv = document.createElement('div');
-            statusDiv.className = `status ${type}`;
-            statusDiv.textContent = message;
-            
-            container.appendChild(statusDiv);
-            
-            // Auto-remove after 5 seconds
-            setTimeout(() => {
-                if (statusDiv.parentNode) {
-                    statusDiv.parentNode.removeChild(statusDiv);
-                }
-            }, 5000);
-        }
-        
-        // Show/hide loading spinner
-        function showLoading(show) {
-            document.getElementById('loading').style.display = show ? 'block' : 'none';
-        }
-        
-
-        
-
-        
-        // Handle single route mode
-
-        
-        // Handle routing mode changes
-        function initRoutingModeControls() {
-            const singleMode = document.querySelector('input[name="routing-mode"][value="single"]');
-            const multiMode = document.querySelector('input[name="routing-mode"][value="multi"]');
-            
-            singleMode.addEventListener('change', function() {
-                if (this.checked) {
-                    handleSingleRouteMode();
-                }
-            });
-            
-            multiMode.addEventListener('change', function() {
-                if (this.checked) {
-                    handleMultiPointMode();
-                }
-            });
-        }
-        
-        // Handle single route mode
-        function handleSingleRouteMode() {
-            document.getElementById('point-to-point-controls').style.display = 'block';
-            document.getElementById('multi-point-controls').style.display = 'none';
-            
-            // Clear multi-point data
-            waypoints = [];
-            clearRoute();
-            updateWaypointsDisplay();
-        }
-        
-        // Handle multi-point routing mode
-        function handleMultiPointMode() {
-            document.getElementById('point-to-point-controls').style.display = 'none';
-            document.getElementById('multi-point-controls').style.display = 'block';
-            
-            // Clear single route data
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
             startPoint = null;
             endPoint = null;
-            clearRoute();
-            updateStartEndDisplay();
-        }
-        
-        // Update waypoints display
-        function updateWaypointsDisplay() {
-            const container = document.getElementById('waypoints-container');
-            
-            if (waypoints.length === 0) {
-                container.innerHTML = '<p class="no-waypoints">Click on the map to add waypoints</p>';
-                return;
-            }
-            
-            container.innerHTML = '';
-            waypoints.forEach((waypoint, index) => {
-                const waypointItem = document.createElement('div');
-                waypointItem.className = 'waypoint-item';
-                waypointItem.innerHTML = `
-                    <div class="waypoint-number">${index + 1}</div>
-                    <div class="waypoint-coords">${waypoint.lat.toFixed(6)}, ${waypoint.lng.toFixed(6)}</div>
-                    <button class="waypoint-remove" onclick="removeWaypoint(${index})">×</button>
-                `;
-                container.appendChild(waypointItem);
-            });
-        }
-        
-        // Remove waypoint
-        function removeWaypoint(index) {
-            waypoints.splice(index, 1);
-            updateWaypointsDisplay();
-            
-            // Remove marker from map
-            if (waypointMarkers[index]) {
-                map.removeLayer(waypointMarkers[index]);
-                waypointMarkers.splice(index, 1);
-            }
-            
-            // Recalculate route if we have enough waypoints
-            if (waypoints.length >= 2) {
-                calculateMultiPointRoute();
-            } else {
-                clearRoute();
-            }
-        }
-        
-        // Update start/end point display
-        function updateStartEndDisplay() {
-            if (startPoint) {
-                document.getElementById('start-coords').textContent = 
-                    `WGS84: (${startPoint.lat.toFixed(6)}, ${startPoint.lng.toFixed(6)})`;
-            } else {
-                document.getElementById('start-coords').textContent = 'Not set';
-            }
-            
-            if (endPoint) {
-                document.getElementById('end-coords').textContent = 
-                    `WGS84: (${endPoint.lat.toFixed(6)}, ${endPoint.lng.toFixed(6)})`;
-            } else {
-                document.getElementById('end-coords').textContent = 'Not set';
-            }
-            
+            updateCoordsDisplay();
             updateCalculateButton();
+            document.getElementById('route-info').style.display = 'none';
+            document.getElementById('status-container').innerHTML = '';
         }
-        
-        // Handle bounding box visibility
-        function initBoundingBoxControl() {
-            const showBboxCheckbox = document.getElementById('show-bbox');
-            
-            showBboxCheckbox.addEventListener('change', function() {
-                showBoundingBox = this.checked;
-                if (showBoundingBox) {
-                    if (startPoint && endPoint) {
-                        updateClippedArea();
-                    }
-                } else {
-                    if (clippedAreaPolygon) {
-                        map.removeLayer(clippedAreaPolygon);
-                        clippedAreaPolygon = null;
-                    }
-                }
-            });
-        }
-        
-        // Export route to GPX format
-        function exportToGPX() {
-            if (!routeLine) {
-                showStatus('No route to export!', 'warning');
-                return;
-            }
-            
-            try {
-                // Get route coordinates
-                const routeCoords = routeLine.getLatLngs();
-                
-                // Create GPX content
-                const gpxContent = generateGPX(routeCoords);
-                
-                // Create and download file
-                const blob = new Blob([gpxContent], { type: 'application/gpx+xml' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `swiss_route_${new Date().toISOString().slice(0, 10)}.gpx`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                showStatus('GPX file exported successfully!', 'success');
-            } catch (error) {
-                console.error('Error exporting GPX:', error);
-                showStatus('Error exporting GPX file', 'error');
+
+        function clearRoute() {
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
             }
         }
-        
-        // Generate GPX content
-        function generateGPX(routeCoords) {
-            const now = new Date().toISOString();
-            const routeName = `Swiss TLM3D Route - ${new Date().toLocaleDateString()}`;
-            
-            let gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Swiss TLM3D Route Planner" xmlns="http://www.topografix.com/GPX/1/1">
-  <metadata>
-    <name>${routeName}</name>
-    <desc>Route planned with Swiss TLM3D Route Planner</desc>
-    <time>${now}</time>
-    <bounds minlat="${Math.min(...routeCoords.map(c => c.lat))}" minlon="${Math.min(...routeCoords.map(c => c.lng))}" maxlat="${Math.max(...routeCoords.map(c => c.lat))}" maxlon="${Math.max(...routeCoords.map(c => c.lng))}"/>
-  </metadata>
-  <trk>
-    <name>${routeName}</name>
-    <trkseg>`;
-            
-            // Add track points
-            routeCoords.forEach((coord, index) => {
-                const time = new Date(Date.now() + index * 60000).toISOString(); // Estimate time
-                gpx += `
-      <trkpt lat="${coord.lat}" lon="${coord.lng}">
-        <time>${time}</time>
-      </trkpt>`;
-            });
-            
-            gpx += `
-    </trkseg>
-  </trk>
-</gpx>`;
-            
-            return gpx;
+
+        function updateCoordsDisplay() {
+            document.getElementById('start-coords').textContent = startPoint ? `${startPoint.lat.toFixed(5)}, ${startPoint.lng.toFixed(5)}` : 'Not set';
+            document.getElementById('end-coords').textContent = endPoint ? `${endPoint.lat.toFixed(5)}, ${endPoint.lng.toFixed(5)}` : 'Not set';
+        }
+
+        function updateCalculateButton() {
+            document.getElementById('calculate-btn').disabled = !(startPoint && endPoint);
         }
         
-        // Update route display to show GPX export button
-        function updateRouteDisplay() {
-            const exportGpxBtn = document.getElementById('export-gpx-btn');
-            if (routeLine) {
-                exportGpxBtn.style.display = 'inline-block';
-            } else {
-                exportGpxBtn.style.display = 'none';
-            }
+        function showStatus(message, type = 'info') {
+            document.getElementById('status-container').innerHTML = `<div class="status ${type}">${message}</div>`;
         }
-        
-        // Generate elevation profile using SwissALTI3D data
-        async function generateElevationProfile(routeCoords) {
-            const profileData = [];
-            let cumulativeDistance = 0;
-            
-            try {
-                // Use SwissALTI3D elevation service
-                // This is a simplified approach - in production you'd use the official API
-                for (let i = 0; i < routeCoords.length; i++) {
-                    const coord = routeCoords[i];
-                    
-                    // Get elevation from SwissALTI3D (simplified - you'd need proper API key)
-                    const elevation = await getSwissALTI3DElevation(coord.lat, coord.lng);
-                    
-                    if (i > 0) {
-                        const prevCoord = routeCoords[i - 1];
-                        const distance = calculateDistance(prevCoord, coord);
-                        cumulativeDistance += distance;
-                    }
-                    
-                    profileData.push({
-                        distance: cumulativeDistance / 1000, // Convert to km
-                        elevation: elevation,
-                        coord: coord // Store coordinate for map sync
-                    });
-                }
-                
-                return profileData;
-            } catch (error) {
-                console.error('Error getting elevation data:', error);
-                // Fallback to basic elevation calculation
-                return generateBasicElevationProfile(routeCoords);
-            }
+
+        function showLoading(isLoading) {
+            document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
         }
-        
-        // Get elevation from TLM3D DEM data (real elevation from Swiss topographic data)
-        async function getSwissALTI3DElevation(lat, lng) {
-            // This function will use the actual TLM3D elevation data from the bodenbedeckung layer
-            // For now, we'll use a more realistic elevation model based on Swiss topography
-            
-            // Swiss elevation ranges roughly from 200m to 4500m
-            // This is a simplified model - real implementation would use the API
-            
-            // Base elevation model for Switzerland
-            const baseElevation = 1000;
-            
-            // Elevation variation based on position (rough approximation)
-            // Higher elevations in central Alps, lower in valleys and plains
-            const latFactor = (lat - 45.8) / (47.8 - 45.8); // 0 to 1 across Switzerland
-            const lngFactor = (lng - 5.9) / (10.5 - 5.9);   // 0 to 1 across Switzerland
-            
-            // Central Alps are higher (around 46.5°N, 8.5°E)
-            const centralAlpsLat = 46.5;
-            const centralAlpsLng = 8.5;
-            const distanceFromAlps = Math.sqrt((lat - centralAlpsLat)**2 + (lng - centralAlpsLng)**2);
-            const alpsFactor = Math.max(0, 1 - distanceFromAlps * 2); // Higher near Alps
-            
-            // Calculate elevation
-            let elevation = baseElevation;
-            elevation += alpsFactor * 2000; // Up to 2000m additional in Alps
-            elevation += Math.sin(lat * 10) * 200; // Terrain variation
-            elevation += Math.cos(lng * 8) * 150;  // More terrain variation
-            
-            // Clamp to realistic Swiss elevation range
-            elevation = Math.max(200, Math.min(4500, elevation));
-            
-            return Math.round(elevation);
-        }
-        
-        // Fallback elevation profile generation
-        function generateBasicElevationProfile(routeCoords) {
-            const profileData = [];
-            let cumulativeDistance = 0;
-            
-            for (let i = 0; i < routeCoords.length; i++) {
-                const coord = routeCoords[i];
-                
-                // Basic elevation model
-                const baseElevation = 1000;
-                const elevation = baseElevation + Math.sin(i * 0.1) * 200;
-                
-                if (i > 0) {
-                    const prevCoord = routeCoords[i - 1];
-                    const distance = calculateDistance(prevCoord, coord);
-                    cumulativeDistance += distance;
-                }
-                
-                profileData.push({
-                    distance: cumulativeDistance / 1000,
-                    elevation: Math.round(elevation),
-                    coord: coord
-                });
-            }
-            
-            return profileData;
-        }
-        
-        // Calculate distance between two coordinates
-        function calculateDistance(coord1, coord2) {
-            const R = 6371000; // Earth's radius in meters
-            const lat1 = coord1.lat * Math.PI / 180;
-            const lat2 = coord2.lat * Math.PI / 180;
-            const deltaLat = (coord2.lat - coord1.lat) * Math.PI / 180;
-            const deltaLng = (coord2.lng - coord1.lng) * Math.PI / 180;
-            
-            const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-                     Math.cos(lat1) * Math.cos(lat2) *
-                     Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            
-            return R * c;
-        }
-        
-        // Draw elevation profile on canvas with interactive features
-        function drawElevationProfile(profileData) {
-            const canvas = document.getElementById('elevation-canvas');
-            const ctx = canvas.getContext('2d');
-            
-            if (!profileData || profileData.length === 0) return;
-            
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
-            // Set canvas size
-            canvas.width = 400;
-            canvas.height = 200;
-            
-            // Store profile data globally for mouse interaction
-            window.currentProfileData = profileData;
-            
-            // Find min/max values
-            const distances = profileData.map(p => p.distance);
-            const elevations = profileData.map(p => p.elevation);
-            const minDist = Math.min(...distances);
-            const maxDist = Math.max(...distances);
-            const minElev = Math.min(...elevations);
-            const maxElev = Math.max(...elevations);
-            
-            // Calculate elevation gain/loss
-            let totalGain = 0;
-            let totalLoss = 0;
-            for (let i = 1; i < profileData.length; i++) {
-                const elevationDiff = profileData[i].elevation - profileData[i - 1].elevation;
-                if (elevationDiff > 0) {
-                    totalGain += elevationDiff;
-                } else {
-                    totalLoss += Math.abs(elevationDiff);
-                }
-            }
-            
-            // Update elevation stats
-            document.getElementById('elevation-gain').textContent = totalGain.toFixed(0);
-            document.getElementById('elevation-loss').textContent = totalLoss.toFixed(0);
-            
-            // Show elevation profile
-            document.getElementById('elevation-profile').style.display = 'block';
-            
-            // Draw grid lines
-            ctx.strokeStyle = '#ddd';
-            ctx.lineWidth = 1;
-            
-            // Vertical grid lines (distance)
-            for (let i = 0; i <= 10; i++) {
-                const x = (i / 10) * canvas.width;
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, canvas.height);
-                ctx.stroke();
-            }
-            
-            // Horizontal grid lines (elevation)
-            for (let i = 0; i <= 5; i++) {
-                const y = (i / 5) * canvas.height;
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(canvas.width, y);
-                ctx.stroke();
-            }
-            
-            // Draw elevation line
-            ctx.strokeStyle = '#28a745';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            
-            for (let i = 0; i < profileData.length; i++) {
-                const point = profileData[i];
-                const x = ((point.distance - minDist) / (maxDist - minDist)) * canvas.width;
-                const y = canvas.height - ((point.elevation - minElev) / (maxElev - minElev)) * canvas.height;
-                
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
-            }
-            
-            ctx.stroke();
-            
-            // Draw waypoint markers on profile
-            if (waypoints.length >= 2) {
-                ctx.fillStyle = '#ffc107';
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 2;
-                
-                for (let i = 0; i < waypoints.length; i++) {
-                    const waypointIndex = Math.floor((i / (waypoints.length - 1)) * (profileData.length - 1));
-                    if (waypointIndex < profileData.length) {
-                        const point = profileData[waypointIndex];
-                        const x = ((point.distance - minDist) / (maxDist - minDist)) * canvas.width;
-                        const y = canvas.height - ((point.elevation - minElev) / (maxElev - minElev)) * canvas.height;
-                        
-                        ctx.beginPath();
-                        ctx.arc(x, y, 6, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.stroke();
-                        
-                        // Add waypoint number
-                        ctx.fillStyle = '#000';
-                        ctx.font = '12px Arial';
-                        ctx.textAlign = 'center';
-                        ctx.fillText(i + 1, x, y - 10);
-                        ctx.fillStyle = '#ffc107';
-                    }
-                }
-            }
-            
-            // Add mouse event listeners for interactive profile
-            addElevationProfileInteractivity(canvas, profileData, minDist, maxDist, minElev, maxElev);
-        }
-        
-        // Add interactive features to elevation profile
-        function addElevationProfileInteractivity(canvas, profileData, minDist, maxDist, minElev, maxElev) {
-            let profileMarker = null;
-            
-            // Mouse move event
-            canvas.addEventListener('mousemove', function(e) {
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                // Find closest point on profile
-                const distance = minDist + (x / canvas.width) * (maxDist - minDist);
-                const closestPoint = findClosestPoint(profileData, distance);
-                
-                if (closestPoint) {
-                    // Update or create profile marker on map
-                    updateProfileMarker(closestPoint.coord);
-                    
-                    // Show tooltip with distance and elevation
-                    showProfileTooltip(e.clientX, e.clientY, closestPoint);
-                }
-            });
-            
-            // Mouse leave event
-            canvas.addEventListener('mouseleave', function() {
-                if (profileMarker) {
-                    map.removeLayer(profileMarker);
-                    profileMarker = null;
-                }
-                hideProfileTooltip();
-            });
-        }
-        
-        // Find closest point on profile to given distance
-        function findClosestPoint(profileData, targetDistance) {
-            let closest = profileData[0];
-            let minDiff = Math.abs(closest.distance - targetDistance);
-            
-            for (let point of profileData) {
-                const diff = Math.abs(point.distance - targetDistance);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = point;
-                }
-            }
-            
-            return closest;
-        }
-        
-        // Update profile marker on map
-        function updateProfileMarker(coord) {
-            if (profileMarker) {
-                map.removeLayer(profileMarker);
-            }
-            
-            profileMarker = L.marker([coord.lat, coord.lng], {
-                icon: L.divIcon({
-                    className: 'profile-marker',
-                    html: '📍',
-                    iconSize: [20, 20]
-                }),
-                pane: 'markersPane'
-            }).addTo(map);
-        }
-        
-        // Show profile tooltip
-        function showProfileTooltip(x, y, point) {
-            let tooltip = document.getElementById('profile-tooltip');
-            if (!tooltip) {
-                tooltip = document.createElement('div');
-                tooltip.id = 'profile-tooltip';
-                tooltip.style.cssText = `
-                    position: fixed;
-                    background: rgba(0,0,0,0.8);
-                    color: white;
-                    padding: 5px 10px;
-                    border-radius: 4px;
-                    font-size: 12px;
-                    pointer-events: none;
-                    z-index: 1000;
-                `;
-                document.body.appendChild(tooltip);
-            }
-            
-            tooltip.style.left = (x + 10) + 'px';
-            tooltip.style.top = (y - 30) + 'px';
-            tooltip.textContent = `Distance: ${point.distance.toFixed(2)} km, Elevation: ${point.elevation} m`;
-            tooltip.style.display = 'block';
-        }
-        
-        // Hide profile tooltip
-        function hideProfileTooltip() {
-            const tooltip = document.getElementById('profile-tooltip');
-            if (tooltip) {
-                tooltip.style.display = 'none';
-            }
-        }
-        
-        // Test function removed - no longer needed with proper Swiss projection
-        
-        // Initialize when page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            initMap();
-            initRoutingModeControls();
-            initBoundingBoxControl();
-            showStatus('Map loaded! Click to set start and end points.', 'info');
-        });
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', initMap);
     </script>
 </body>
 </html>
