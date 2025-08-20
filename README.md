@@ -7,10 +7,12 @@ A high-performance routing application for Switzerland using official Swiss topo
 - **Point-to-Point Routing**: Route between any two points along roads
 - **Multi-Point Routing**: Create complex routes with multiple waypoints
 - **Real Swiss Topography**: Uses official TLM3D road network data
+- **Ski Touring Routes**: Dedicated ski route network for winter sports
 - **Real Elevation Data**: SwissALTI3D elevation profiles
 - **Interactive Map**: Leaflet-based interface with Swisstopo maps
 - **GPX Export**: Export routes for GPS devices
 - **Performance Optimized**: Clipped network loading for fast routing
+- **Robust Geometry Mapping**: Fixed momepy integration for reliable routing
 
 ## 📁 Project Structure
 
@@ -19,7 +21,9 @@ dufour/
 ├── data/                          # Raw data (gitignored)
 │   ├── elevation/
 │   │   └── swissalti3d/          # SwissALTI3D elevation tiles
-│   └── tlm3d/                    # TLM3D road network data
+│   ├── tlm3d/                    # TLM3D road network data
+│   ├── skitouring/               # Ski touring route data
+│   └── preprocessed/             # Pre-processed network files
 ├── route_backend.py              # Core routing engine
 ├── route_interface.html          # Web interface
 ├── app.py                        # Flask web server
@@ -46,7 +50,11 @@ pip install -r requirements.txt
 ### 2. Download Data
 
 **TLM3D Road Network:**
-- Place your `SWISSTLM3D_2025.gpkg` file in the project root
+- Place your `SWISSTLM3D_2025.gpkg` file in `data/tlm3d/`
+- Update the path in `route_backend.py` if needed
+
+**Ski Touring Routes:**
+- Place your ski touring GPKG file in `data/skitouring/`
 - Update the path in `route_backend.py` if needed
 
 **SwissALTI3D Elevation Data:**
@@ -61,7 +69,17 @@ python download_elevation.py --sample --num-sample 10
 python download_elevation.py
 ```
 
-### 3. Start the Application
+### 3. Pre-process Networks (Required for routing)
+
+```bash
+# Pre-process all networks (TLM3D + Ski routes)
+python route_backend.py preprocess
+
+# Or pre-process only ski routes (faster)
+python route_backend.py preprocess-ski
+```
+
+### 4. Start the Application
 
 ```bash
 # Start Flask server
@@ -102,6 +120,13 @@ python app.py
 - **Network Clipping**: Only loads roads within buffer around route
 - **Spatial Indexing**: Efficient nearest-point calculations
 - **Geometry Interpolation**: Smooth routes with minimal straight lines
+- **Pre-processed Networks**: One-time conversion for faster loading
+
+### Recent Improvements (Latest Update)
+- **Fixed momepy Integration**: Robust geometry mapping between network and graph
+- **Ski Touring Support**: Added dedicated ski route network
+- **Improved Clipping**: Better edge weight handling for virtual connections
+- **Debug Logging**: Enhanced troubleshooting and performance monitoring
 
 ### Data Sources
 - **Roads**: TLM3D (Swiss Federal Office of Topography)
@@ -138,6 +163,31 @@ pip install geopandas
 
 **"Projection failed"**
 - Ensure map is using EPSG:2056 CRS
+
+**"Unknown network type: ski"**
+- Use `ski_touring` instead of `ski` in the backend
+- Ensure pre-processed networks are created first
+
+## 📈 Current Status
+
+### ✅ Completed
+- **Core routing engine** with NetworkX and momepy
+- **Coordinate system handling** (WGS84 ↔ LV95)
+- **Network clipping** for performance optimization
+- **Geometry mapping** between GeoDataFrame and NetworkX graph
+- **Ski touring network support**
+- **Pre-processing pipeline** for network optimization
+
+### 🔄 In Progress
+- **Route geometry building** from clipped network
+- **Virtual edge weight optimization** for better routing
+- **Performance tuning** of clipping algorithms
+
+### 🎯 Next Steps
+- **Complete route geometry extraction** from actual network edges
+- **Optimize virtual edge handling** to prefer real routes
+- **Add elevation profile support** for ski routes
+- **Implement route caching** for repeated queries
 - Check coordinate conversion functions
 
 **Slow routing**
