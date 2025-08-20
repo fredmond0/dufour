@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
-from route_backend import main_route_calculation
+from route_backend import main_route_calculation, load_ski_touring_routes
 
 app = Flask(__name__)
 
@@ -23,17 +23,19 @@ def calculate_route():
         start_coords = data.get('start_coords')
         end_coords = data.get('end_coords')
         buffer_distance = data.get('buffer_distance', 5000)  # Default 5km
+        network_type = data.get('network_type', 'tlm3d')  # Default to TLM3D
         
         if not start_coords or not end_coords:
             return jsonify({'success': False, 'error': 'Missing start or end coordinates'}), 400
         
-        print(f"Calculating route from {start_coords} to {end_coords} with buffer {buffer_distance}m")
+        print(f"Calculating {network_type} route from {start_coords} to {end_coords} with buffer {buffer_distance}m")
         
         # Call your optimized routing function
-        shortest_path, path_length, roads_loaded = main_route_calculation(
+        shortest_path, path_length, segments_loaded = main_route_calculation(
             start_coords, 
             end_coords, 
-            buffer_distance
+            buffer_distance,
+            network_type
         )
         
         if shortest_path and path_length:
@@ -42,8 +44,9 @@ def calculate_route():
                 'success': True,
                 'route': shortest_path,
                 'path_length': path_length,
-                'roads_loaded': roads_loaded,
-                'buffer_distance': buffer_distance
+                'segments_loaded': segments_loaded,
+                'buffer_distance': buffer_distance,
+                'network_type': network_type
             })
         else:
             return jsonify({
@@ -56,6 +59,40 @@ def calculate_route():
         return jsonify({
             'success': False, 
             'error': f'Route calculation failed: {str(e)}'
+        }), 500
+
+@app.route('/get_ski_routes', methods=['GET'])
+def get_ski_routes():
+    """Get ski touring routes for display on the map"""
+    try:
+        # Get optional bounding box parameters for performance
+        bbox_params = request.args.get('bbox')
+        bbox = None
+        
+        if bbox_params:
+            try:
+                # Parse bbox as "minx,miny,maxx,maxy"
+                coords = [float(x) for x in bbox_params.split(',')]
+                if len(coords) == 4:
+                    bbox = coords
+            except:
+                pass
+        
+        # Load ski touring routes
+        ski_routes = load_ski_touring_routes(bbox)
+        
+        if ski_routes is not None and len(ski_routes) > 0:
+            # Convert to GeoJSON for frontend
+            routes_geojson = ski_routes.to_json()
+            return routes_geojson, 200, {'Content-Type': 'application/json'}
+        else:
+            return jsonify({'routes': []}), 200
+            
+    except Exception as e:
+        print(f"Error loading ski touring routes: {str(e)}")
+        return jsonify({
+            'success': False, 
+            'error': f'Failed to load ski touring routes: {str(e)}'
         }), 500
 
 @app.route('/static/<path:filename>')

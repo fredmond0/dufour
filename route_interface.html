@@ -188,6 +188,87 @@
             cursor: pointer;
         }
         
+        .layer-controls {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .layer-controls h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        .layer-controls label {
+            display: block;
+            margin: 8px 0;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        .network-selection {
+            margin: 15px 0;
+            padding: 10px;
+            background: #e8f5e8;
+            border-radius: 4px;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .network-selection h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #155724;
+            font-size: 14px;
+        }
+        
+        .network-selection label {
+            display: block;
+            margin: 8px 0;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        .network-help {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #17a2b8;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+        
+        .network-status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 4px;
+            text-align: center;
+            font-weight: bold;
+            color: #155724;
+        }
+        
+        .ski-route-popup {
+            font-family: Arial, sans-serif;
+        }
+        
+        .ski-route-popup h4 {
+            margin: 0 0 10px 0;
+            color: #0066cc;
+            font-size: 14px;
+        }
+        
+        .ski-route-popup p {
+            margin: 5px 0;
+            font-size: 12px;
+            color: #333;
+        }
+        
         .bounding-box-control {
             margin: 10px 0;
             padding: 10px;
@@ -401,6 +482,36 @@
                     💡 <strong>Tip:</strong> Click anywhere along a road - you don't need to click exactly at junctions!
                 </div>
                 
+                <div id="network-status" class="network-status">
+                    <span id="current-network">🚗 TLM3D Network Selected</span>
+                </div>
+                
+                <div class="layer-controls">
+                    <h4>🗺️ Map Layers</h4>
+                    <label>
+                        <input type="checkbox" id="showSkiRoutes" checked> 🎿 Show Ski Touring Routes
+                    </label>
+                    <label>
+                        <input type="checkbox" id="showBoundingBox"> 📦 Show Bounding Box
+                    </label>
+                </div>
+                
+                <div class="network-selection">
+                    <h4>🛤️ Routing Network</h4>
+                    <label>
+                        <input type="radio" name="network-type" value="tlm3d" checked> 🚗 TLM3D (Roads & Trails)
+                    </label>
+                    <label>
+                        <input type="radio" name="network-type" value="ski_touring"> 🎿 Ski Touring Routes
+                    </label>
+                    <div class="network-help">
+                        <small>
+                            <strong>TLM3D:</strong> Roads, hiking trails, and paths<br>
+                            <strong>Ski Touring:</strong> Dedicated ski routes only
+                        </small>
+                    </div>
+                </div>
+                
                 <!-- Point to Point Controls (only visible in single mode) -->
                 <div id="point-to-point-controls" class="point-to-point-controls">
                     <div class="point-inputs">
@@ -479,8 +590,8 @@
                         <div class="stat-label">Buffer (km)</div>
                     </div>
                     <div class="stat">
-                        <div class="stat-value" id="roads-loaded">-</div>
-                        <div class="stat-label">Roads Loaded</div>
+                        <div class="stat-value" id="segments-loaded">-</div>
+                        <div class="stat-label">Segments Loaded</div>
                     </div>
                 </div>
                 <div class="route-stats">
@@ -527,6 +638,7 @@
         let startMarker = null;
         let endMarker = null;
         let routeLine = null;
+        let routeCasing = null;  // Store reference to route casing
         let clippedAreaPolygon = null;
         let startPoint = null;
         let endPoint = null;
@@ -541,6 +653,18 @@
             map = L.map('map', {
                 crs: L.CRS.EPSG2056
             });
+            // Dedicated pane so ski routes render on top of other overlays
+            map.createPane('skiRoutesPane');
+            map.getPane('skiRoutesPane').style.zIndex = 650;
+            map.getPane('skiRoutesPane').style.pointerEvents = 'none';
+            
+            // Medium z-index pane for route lines so they appear above ski routes but below markers
+            map.createPane('routePane');
+            map.getPane('routePane').style.zIndex = 675;
+            
+            // High z-index pane for markers so they appear above everything
+            map.createPane('markersPane');
+            map.getPane('markersPane').style.zIndex = 700;
             
             // Add Swiss topographic maps
             const swissTopo = L.tileLayer.swiss();
@@ -563,6 +687,146 @@
             // Add click event and initialize UI
             map.on('click', onMapClick);
             initUI();
+            
+            // Load ski touring routes
+            loadSkiTouringRoutes();
+        }
+        
+        // Load and display ski touring routes
+        function loadSkiTouringRoutes() {
+            console.log('Loading ski touring routes...');
+            
+            fetch('/get_ski_routes')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.features && data.features.length > 0) {
+                        console.log(`Loaded ${data.features.length} ski touring routes`);
+                        displaySkiTouringRoutes(data);
+                    } else {
+                        console.log('No ski touring routes found');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading ski touring routes:', error);
+                });
+        }
+        
+        // Display ski touring routes on the map
+        function displaySkiTouringRoutes(routesData) {
+            // Remove existing ski routes if any
+            if (window.skiRoutesLayer) {
+                map.removeLayer(window.skiRoutesLayer);
+            }
+            
+            // Create a new layer group for ski routes
+            window.skiRoutesLayer = L.layerGroup();
+
+            // Helper to add a bold, double-stroked ski route polyline
+            function addSkiPolyline(latLngCoords) {
+                // Outer casing for contrast
+                const casing = L.polyline(latLngCoords, {
+                    color: '#ffffff',
+                    weight: 9,
+                    opacity: 0.9,
+                    pane: 'skiRoutesPane'
+                });
+                // Main blue stroke
+                const main = L.polyline(latLngCoords, {
+                    color: '#0066ff',
+                    weight: 6,
+                    opacity: 1.0,
+                    pane: 'skiRoutesPane'
+                });
+                window.skiRoutesLayer.addLayer(casing);
+                window.skiRoutesLayer.addLayer(main);
+            }
+            
+            routesData.features.forEach(feature => {
+                if (!feature.geometry) return;
+
+                const type = feature.geometry.type;
+                const coords = feature.geometry.coordinates;
+
+                // Popup (bind to last segment drawn)
+                const popupContent = `
+                    <div class="ski-route-popup">
+                        <h4>🎿 ${feature.properties?.name_de || feature.properties?.name || 'Ski Route'}</h4>
+                        ${feature.properties?.difficulty_de ? `<p><strong>Difficulty:</strong> ${feature.properties.difficulty_de}</p>` : ''}
+                        ${feature.properties?.ascent_time ? `<p><strong>Ascent Time:</strong> ${feature.properties.ascent_time} min</p>` : ''}
+                        ${feature.properties?.target_altitude ? `<p><strong>Peak Altitude:</strong> ${feature.properties.target_altitude}m</p>` : ''}
+                    </div>
+                `;
+
+                if (type === 'LineString') {
+                    const latLngCoords = coords.map(coord => {
+                        const p = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                        return [p.lat, p.lng];
+                    });
+                    addSkiPolyline(latLngCoords);
+                } else if (type === 'MultiLineString') {
+                    coords.forEach(part => {
+                        const latLngCoords = part.map(coord => {
+                            const p = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                            return [p.lat, p.lng];
+                        });
+                        addSkiPolyline(latLngCoords);
+                    });
+                }
+            });
+            
+            // Add ski routes layer to map
+            window.skiRoutesLayer.addTo(map);
+            
+            // Update layer control
+            updateLayerVisibility();
+        }
+        
+        // Update layer visibility based on checkbox states
+        function updateLayerVisibility() {
+            const showSkiRoutes = document.getElementById('showSkiRoutes').checked;
+            const showBoundingBox = document.getElementById('showBoundingBox').checked;
+            
+            if (window.skiRoutesLayer) {
+                if (showSkiRoutes) {
+                    if (!map.hasLayer(window.skiRoutesLayer)) {
+                        map.addLayer(window.skiRoutesLayer);
+                    }
+                } else {
+                    if (map.hasLayer(window.skiRoutesLayer)) {
+                        map.removeLayer(window.skiRoutesLayer);
+                    }
+                }
+            }
+            
+            if (window.boundingBoxLayer) {
+                if (showBoundingBox) {
+                    if (!map.hasLayer(window.boundingBoxLayer)) {
+                        map.addLayer(window.boundingBoxLayer);
+                    }
+                } else {
+                    if (map.hasLayer(window.boundingBoxLayer)) {
+                        map.removeLayer(window.boundingBoxLayer);
+                    }
+                }
+            }
+        }
+        
+        // Update network status display
+        function updateNetworkStatus() {
+            const selectedNetwork = document.querySelector('input[name="network-type"]:checked').value;
+            const statusElement = document.getElementById('current-network');
+            
+            if (selectedNetwork === 'tlm3d') {
+                statusElement.textContent = '🚗 TLM3D Network Selected (Roads & Trails)';
+                statusElement.parentElement.style.background = '#d4edda';
+                statusElement.parentElement.style.borderColor = '#c3e6cb';
+                statusElement.parentElement.style.color = '#155724';
+            } else if (selectedNetwork === 'ski_touring') {
+                statusElement.textContent = '🎿 Ski Touring Network Selected';
+                statusElement.parentElement.style.background = '#cce5ff';
+                statusElement.parentElement.style.borderColor = '#b3d7ff';
+                statusElement.parentElement.style.color = '#004085';
+            }
         }
         
         // Initialize UI components
@@ -574,6 +838,18 @@
                     updateClippedArea();
                 }
             });
+            
+            // Add event listeners for layer controls
+            document.getElementById('showSkiRoutes').addEventListener('change', updateLayerVisibility);
+            document.getElementById('showBoundingBox').addEventListener('change', updateLayerVisibility);
+            
+            // Add event listeners for network type selection
+            document.querySelectorAll('input[name="network-type"]').forEach(radio => {
+                radio.addEventListener('change', updateNetworkStatus);
+            });
+            
+            // Initialize network status
+            updateNetworkStatus();
         }
         
         // Handle map clicks - use Swiss projection coordinates directly
@@ -683,7 +959,8 @@
                     html: `${waypoints.length}`,
                     iconSize: [24, 24]
                 }),
-                draggable: true
+                draggable: true,
+                pane: 'markersPane'
             }).addTo(map);
             
             // Store marker reference
@@ -770,7 +1047,8 @@
                     className: 'start-marker',
                     html: '🟢',
                     iconSize: [20, 20]
-                })
+                }),
+                pane: 'markersPane'
             }).addTo(map);
             
             // Update UI
@@ -796,7 +1074,8 @@
                     className: 'end-marker',
                     html: '🔴',
                     iconSize: [20, 20]
-                })
+                }),
+                pane: 'markersPane'
             }).addTo(map);
             
             // Update UI
@@ -910,11 +1189,15 @@
             showLoading(true);
             
             try {
+                // Get selected network type
+                const networkType = document.querySelector('input[name="network-type"]:checked').value;
+                
                 // Prepare data for backend
                 const routeData = {
                     start_coords: [startPoint.swiss.x, startPoint.swiss.y],
                     end_coords: [endPoint.swiss.x, endPoint.swiss.y],
-                    buffer_distance: bufferDistance * 1000 // Convert to meters
+                    buffer_distance: bufferDistance * 1000, // Convert to meters
+                    network_type: networkType
                 };
                 
                 console.log('Sending route data to backend:', routeData);
@@ -937,7 +1220,7 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    displayRoute(result.route, result.path_length, result.roads_loaded);
+                    displayRoute(result.route, result.path_length, result.segments_loaded);
                     showStatus('Route calculated successfully!', 'success');
                 } else {
                     throw new Error(result.error || 'Route calculation failed');
@@ -972,10 +1255,14 @@
                     const start = waypoints[i];
                     const end = waypoints[i + 1];
                     
+                    // Get selected network type
+                    const networkType = document.querySelector('input[name="network-type"]:checked').value;
+                    
                     const routeData = {
                         start_coords: [start.swiss.x, start.swiss.y],
                         end_coords: [end.swiss.x, end.swiss.y],
-                        buffer_distance: bufferDistance * 1000
+                        buffer_distance: bufferDistance * 1000,
+                        network_type: networkType
                     };
                     
                     const response = await fetch('/calculate_route', {
@@ -1001,7 +1288,7 @@
                             totalRoute = result.route;
                         }
                         totalLength += result.path_length;
-                        totalRoadsLoaded += result.roads_loaded;
+                        totalRoadsLoaded += result.segments_loaded || 0;
                     } else {
                         throw new Error(result.error || 'Route calculation failed');
                     }
@@ -1020,7 +1307,7 @@
         }
         
         // Display the calculated route
-        function displayRoute(route, pathLength, roadsLoaded) {
+        function displayRoute(route, pathLength, segmentsLoaded) {
             // Remove existing route
             if (routeLine) {
                 map.removeLayer(routeLine);
@@ -1029,20 +1316,36 @@
             // Convert LV95 coordinates back to lat/lng using proper CRS transformation
             const routeLatLng = route.map(coord => {
                 const projected = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
-                return [projected.lat, projected.lng];
+                return [projected.lng, projected.lat];
             });
             
             console.log('Displaying route with coordinates:', routeLatLng);
+            console.log('Route coordinates count:', routeLatLng.length);
+            console.log('Route bounds:', routeLatLng);
             
             // Draw route line with maximum quality and precision
+            // First add a white casing for better visibility
+            routeCasing = L.polyline(routeLatLng, {
+                color: '#ffffff',
+                weight: 12,          // White casing around the route
+                opacity: 1.0,
+                smoothFactor: 0,
+                lineCap: 'round',
+                lineJoin: 'round',
+                renderer: L.canvas(),
+                pane: 'routePane'
+            }).addTo(map);
+            
+            // Then the main route line
             routeLine = L.polyline(routeLatLng, {
-                color: '#28a745',
-                weight: 8,           // Increased from 6 to 8 for better visibility
-                opacity: 0.9,        // Increased from 0.8 to 0.9 for better contrast
+                color: '#ff6600',    // Bright orange for high visibility
+                weight: 8,           // Main route line
+                opacity: 1.0,        // Full opacity
                 smoothFactor: 0,     // Set to 0 for maximum precision - draw through every single waypoint
                 lineCap: 'round',    // Rounded line ends
                 lineJoin: 'round',   // Rounded line joins
-                renderer: L.canvas() // Use canvas renderer for better quality with many points
+                renderer: L.canvas(), // Use canvas renderer for better quality with many points
+                pane: 'routePane'    // Medium z-index so route appears above ski routes but below markers
             }).addTo(map);
             
             // Fit map to show the entire route
@@ -1053,7 +1356,7 @@
             document.getElementById('route-length').textContent = (pathLength / 1000).toFixed(2);
             document.getElementById('route-nodes').textContent = route.length;
             document.getElementById('buffer-size').textContent = bufferDistance.toFixed(1);
-            document.getElementById('roads-loaded').textContent = roadsLoaded;
+            document.getElementById('segments-loaded').textContent = segmentsLoaded || 'N/A';
             
             // Update route display controls
             updateRouteDisplay();
@@ -1068,6 +1371,10 @@
             if (routeLine) {
                 map.removeLayer(routeLine);
                 routeLine = null;
+            }
+            if (routeCasing) {
+                map.removeLayer(routeCasing);
+                routeCasing = null;
             }
             document.getElementById('route-info').style.display = 'none';
             document.getElementById('elevation-profile').style.display = 'none';
@@ -1616,7 +1923,8 @@
                     className: 'profile-marker',
                     html: '📍',
                     iconSize: [20, 20]
-                })
+                }),
+                pane: 'markersPane'
             }).addTo(map);
         }
         
