@@ -60,7 +60,7 @@ def calculate_route():
         )
         
         try:
-            shortest_path, path_length, segments_loaded = result
+            shortest_path, path_length, segments_loaded, elevation_profile = result
         except Exception as e:
             return jsonify({'success': False, 'error': f'Internal unpacking error: {e}'}), 500
 
@@ -71,6 +71,7 @@ def calculate_route():
                 'path_length': path_length,
                 'segments_loaded': segments_loaded,
                 'buffer_distance': buffer_distance,
+                'elevation_profile': elevation_profile,
             })
         else:
             return jsonify({

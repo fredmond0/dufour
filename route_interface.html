@@ -6,6 +6,7 @@
     <title>Swiss TLM3D Route Planner (Debug Interface)</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; display: flex; height: 100vh; }
@@ -67,6 +68,13 @@
             <div><strong>Segments Loaded:</strong> <span id="segments-loaded">-</span></div>
             <div><strong>Buffer Used:</strong> <span id="buffer-size">-</span> km</div>
         </div>
+        
+        <div id="elevation-chart-container" class="route-info" style="display: none;">
+            <h4>🏔️ Elevation Profile</h4>
+            <div style="height: 200px; width: 100%; overflow: hidden;">
+                <canvas id="elevation-chart" style="max-width: 100%; max-height: 100%;"></canvas>
+            </div>
+        </div>
     </div>
     
     <div class="map-container">
@@ -84,6 +92,7 @@
         let routeLayer = null;
         let startPoint = null;
         let endPoint = null;
+        let elevationChart = null;
 
         // --- Map Initialization ---
         function initMap() {
@@ -212,6 +221,11 @@
             document.getElementById('route-length').textContent = (result.path_length / 1000).toFixed(2);
             document.getElementById('segments-loaded').textContent = result.segments_loaded;
             document.getElementById('buffer-size').textContent = (result.buffer_distance / 1000).toFixed(1);
+            
+            // Display elevation profile if available
+            if (result.elevation_profile && result.elevation_profile.length > 0) {
+                displayElevationProfile(result.elevation_profile);
+            }
         }
 
         function clearAll() {
@@ -223,7 +237,14 @@
             updateCoordsDisplay();
             updateCalculateButton();
             document.getElementById('route-info').style.display = 'none';
+            document.getElementById('elevation-chart-container').style.display = 'none';
             document.getElementById('status-container').innerHTML = '';
+            
+            // Destroy elevation chart if it exists
+            if (elevationChart) {
+                elevationChart.destroy();
+                elevationChart = null;
+            }
         }
 
         function clearRoute() {
@@ -248,6 +269,67 @@
 
         function showLoading(isLoading) {
             document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
+        }
+
+        // --- Elevation Profile Chart Functions ---
+        function displayElevationProfile(elevationProfile) {
+            // Destroy existing chart if it exists
+            if (elevationChart) {
+                elevationChart.destroy();
+                elevationChart = null;
+            }
+            
+            // Show the chart container
+            document.getElementById('elevation-chart-container').style.display = 'block';
+            
+            // Prepare data for Chart.js
+            const distances = elevationProfile.map(point => point[0]);
+            const elevations = elevationProfile.map(point => point[1]);
+            
+            // Create the chart with minimal, stable configuration
+            const ctx = document.getElementById('elevation-chart').getContext('2d');
+            elevationChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: distances.map(d => (d / 1000).toFixed(1) + ' km'),
+                    datasets: [{
+                        label: 'Elevation',
+                        data: elevations,
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: false,
+                        tension: 0,
+                        pointRadius: 0,
+                        pointHoverRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: false,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Distance (km)'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Elevation (m)'
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         // --- Initial Load ---

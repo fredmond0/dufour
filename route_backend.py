@@ -1,9 +1,12 @@
 import geopandas as gpd
 import networkx as nx
 import os
+import requests
+import math
 from shapely.geometry import Point, box, LineString, MultiPoint
 from shapely.ops import nearest_points, split
 import momepy
+from pyproj import Transformer
 
 # --- Configuration ---
 PREPROCESSED_TLM3D_PATH = './data/preprocessed/tlm3d_network_processed.gpkg'
@@ -11,7 +14,6 @@ PREPROCESSED_SKI_PATH = './data/preprocessed/ski_network_processed.gpkg'
 
 def create_clipped_network(start_coords, end_coords, buffer_distance, network_type):
     """Creates a clipped GeoDataFrame from a pre-processed file."""
-    print(f"Creating clipped {network_type} network with buffer: {buffer_distance}m")
     
     # Define file paths for each network type
     filepath = {
@@ -98,6 +100,97 @@ def load_network_to_graph(gdf):
         print("Warning: Some edges were not assigned a geometry.")
         
     return graph
+
+def fetch_elevations_for_coordinates(coordinates_2d, chunk_size=100):
+    """
+    Fetches elevation data for a route using Swisstopo Profile service.
+    This is much more efficient than individual point requests.
+    
+    Args:
+        coordinates_2d: List of (x, y) coordinate tuples in LV95
+        chunk_size: Not used for profile service, kept for compatibility
+    
+    Returns:
+        List of (x, y, elevation) coordinate tuples
+    """
+    if not coordinates_2d or len(coordinates_2d) < 2:
+        return []
+    
+    # Create a GeoJSON LineString from the route coordinates
+    # The API expects coordinates as [x, y] arrays, not tuples
+    coordinates_array = [[x, y] for x, y in coordinates_2d]
+    
+    geojson = {
+        "type": "LineString",
+        "coordinates": coordinates_array
+    }
+    
+    # Convert to proper JSON string and URL encode it
+    import json
+    import urllib.parse
+    geom_json = json.dumps(geojson)
+    geom_param = urllib.parse.quote(geom_json)
+    
+    # Build the Profile API URL
+    api_url = f"https://api3.geo.admin.ch/rest/services/profile.json?geom={geom_param}&sr=2056&nb_points=200"
+    
+    try:
+        response = requests.get(api_url, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # The API returns the data directly as a list, not wrapped in a 'profile' key
+        if isinstance(data, list) and len(data) > 0:
+            elevations = []
+            
+            # Extract elevation data from profile response
+            for point in data:
+                if 'alts' in point and 'easting' in point and 'northing' in point:
+                    x = point['easting']
+                    y = point['northing']
+                    # Use the COMB elevation (combined model)
+                    elevation = point['alts']['COMB']
+                    elevations.append((x, y, elevation))
+            
+            print(f"Elevation data fetched for {len(elevations)} points")
+            return elevations
+        else:
+            print(f"Warning: No profile data in API response")
+            return []
+            
+    except Exception as e:
+        print(f"Warning: Failed to fetch elevation profile: {e}")
+        return []
+
+def calculate_elevation_profile(coordinates_3d):
+    """
+    Converts 3D route coordinates into elevation profile data.
+    
+    Args:
+        coordinates_3d: List of (x, y, elevation) coordinate tuples
+    
+    Returns:
+        List of [distance, elevation] pairs for charting
+    """
+    if len(coordinates_3d) < 2:
+        return []
+    
+    profile = []
+    cumulative_distance = 0.0
+    
+    for i in range(len(coordinates_3d)):
+        x, y, elevation = coordinates_3d[i]
+        
+        # Calculate distance from previous point
+        if i > 0:
+            prev_x, prev_y, _ = coordinates_3d[i-1]
+            segment_distance = math.sqrt((x - prev_x)**2 + (y - prev_y)**2)
+            cumulative_distance += segment_distance
+        
+        profile.append([cumulative_distance, elevation])
+    
+    return profile
 
 def find_nearest_edge(graph, point):
     """
@@ -311,19 +404,36 @@ def calculate_route_from_gpkg(start_coords, end_coords, buffer_distance=5000, ne
     
     if result is None:
         print("=== Route Calculation Failed ===")
-        return None, None, segments_loaded
+        return None, None, segments_loaded, []
     
     try:
         route_geometry, path_length = result
     except Exception as e:
-        return None, None, segments_loaded
+        return None, None, segments_loaded, []
     
     if route_geometry:
         print("=== Route Calculation Successful ===")
+        
+        # Enrich route with elevation data
+        print("Fetching elevation data...")
+        try:
+            # Get 3D coordinates with elevation
+            coordinates_3d = fetch_elevations_for_coordinates(route_geometry)
+            
+            # Calculate elevation profile for charting
+            elevation_profile = calculate_elevation_profile(coordinates_3d)
+            
+            print(f"Elevation data fetched for {len(coordinates_3d)} points")
+            print(f"Elevation profile created with {len(elevation_profile)} data points")
+            
+        except Exception as e:
+            print(f"Warning: Failed to fetch elevation data: {e}")
+            elevation_profile = []
     else:
         print("=== Route Calculation Failed ===")
+        elevation_profile = []
 
-    return route_geometry, path_length, segments_loaded
+    return route_geometry, path_length, segments_loaded, elevation_profile
 
 if __name__ == '__main__':
     # (No changes to the testing section)
