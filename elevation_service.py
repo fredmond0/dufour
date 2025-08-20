@@ -10,6 +10,7 @@ from rasterio.warp import transform
 import numpy as np
 from pathlib import Path
 import logging
+from pyproj import Transformer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -21,11 +22,12 @@ class SwissALTI3DElevationService:
     def __init__(self, elevation_dir="data/elevation/swissalti3d"):
         self.elevation_dir = Path(elevation_dir)
         self.tile_cache = {}  # Cache opened tiles for performance
+        # Initialize coordinate transformer for WGS84 to LV95 conversion
+        self.transformer = Transformer.from_crs("EPSG:4326", "EPSG:2056", always_xy=True)
         
     def find_elevation_tile(self, lat, lng):
         """Find the appropriate elevation tile for given coordinates"""
-        # Convert WGS84 to Swiss LV95 coordinates
-        # This is a simplified approach - in production you'd use proper projection
+        # Convert WGS84 to Swiss LV95 coordinates using proper projection
         lv95_x, lv95_y = self._wgs84_to_lv95(lat, lng)
         
         # Find tile that contains these coordinates
@@ -95,10 +97,17 @@ class SwissALTI3DElevationService:
         return elevations
     
     def _wgs84_to_lv95(self, lat, lng):
-        """Convert WGS84 coordinates to Swiss LV95 (simplified)"""
-        # This is a simplified conversion - in production you'd use pyproj
-        # For now, we'll use a rough approximation
-        
+        """Convert WGS84 coordinates to Swiss LV95 using proper projection"""
+        try:
+            x, y = self.transformer.transform(lng, lat)
+            return x, y
+        except Exception as e:
+            logger.error(f"Coordinate transformation failed: {e}")
+            # Fallback to approximate conversion if pyproj fails
+            return self._wgs84_to_lv95_fallback(lat, lng)
+    
+    def _wgs84_to_lv95_fallback(self, lat, lng):
+        """Fallback coordinate conversion method (less accurate)"""
         # Switzerland bounds and LV95 ranges
         lat_min, lat_max = 45.8, 47.8
         lng_min, lng_max = 5.9, 10.5

@@ -852,7 +852,7 @@
             updateNetworkStatus();
         }
         
-        // Handle map clicks - use Swiss projection coordinates directly
+        // Handle map clicks - send WGS84 coordinates to backend
         function onMapClick(e) {
             // Use Leaflet's built-in coordinate transformation properly
             console.log(`=== Map Click Debug ===`);
@@ -862,81 +862,61 @@
             // Store the original click coordinates for marker placement
             const originalLatLng = { lat: e.latlng.lat, lng: e.latlng.lng };
             
-            // Try to get the CRS coordinates directly
-            let swissCoords;
+            // For the backend, we'll send WGS84 coordinates (latitude/longitude)
+            // The backend will handle the projection to Swiss LV95
+            const wgs84Coords = { lat: e.latlng.lat, lng: e.latlng.lng };
             
-            try {
-                // Method 1: Try to get the CRS coordinates directly
-                const crsPoint = map.options.crs.latLngToPoint(e.latlng, map.getZoom());
-                console.log(`CRS point:`, crsPoint);
-                
-                // Method 2: Try to transform to the CRS projection
-                const transformed = map.options.crs.projection.project(e.latlng);
-                console.log(`Transformed to projection:`, transformed);
-                
-                // Check if we got valid LV95 coordinates
-                if (transformed && transformed.x > 2000000 && transformed.y > 500000) {
-                    swissCoords = { x: Math.round(transformed.x), y: Math.round(transformed.y) };
-                    console.log(`✅ Got LV95 coordinates via projection: (${swissCoords.x}, ${swissCoords.y})`);
-                } else {
-                    throw new Error('Projection returned invalid coordinates');
-                }
-            } catch (error) {
-                console.log(`⚠️ Leaflet projection failed:`, error.message);
-                console.log(`🔄 Falling back to manual conversion`);
-                swissCoords = convertLatLngToSwiss(e.latlng.lat, e.latlng.lng);
-                console.log(`Manual conversion to LV95: (${swissCoords.x}, ${swissCoords.y})`);
-            }
+            console.log(`✅ Sending WGS84 coordinates to backend: (${wgs84Coords.lat}, ${wgs84Coords.lng})`);
             
             // Check current routing mode
             const isMultiPoint = document.querySelector('input[name="routing-mode"][value="multi"]').checked;
             
             if (isMultiPoint) {
                 // Multi-point routing mode
-                handleMultiPointClick(swissCoords, originalLatLng);
+                handleMultiPointClick(wgs84Coords, originalLatLng);
             } else {
                 // Single route mode (original functionality)
-                handleSingleRouteClick(swissCoords, originalLatLng);
+                handleSingleRouteClick(wgs84Coords, originalLatLng);
             }
         }
         
         // Handle clicks in single route mode
-        function handleSingleRouteClick(swissCoords, originalLatLng) {
+        function handleSingleRouteClick(wgs84Coords, originalLatLng) {
             // Check if we're clicking too close to existing points
-            if (startPoint && isTooClose(swissCoords.x, swissCoords.y, startPoint.swiss.x, startPoint.swiss.y)) {
+            if (startPoint && isTooClose(wgs84Coords.lat, wgs84Coords.lng, startPoint.lat, startPoint.lng)) {
                 showStatus('Click further away from the start point', 'warning');
                 return;
             }
             
-            if (endPoint && isTooClose(swissCoords.x, swissCoords.y, endPoint.swiss.x, endPoint.swiss.y)) {
+            if (endPoint && isTooClose(wgs84Coords.lat, wgs84Coords.lng, endPoint.lat, endPoint.lng)) {
                 showStatus('Click further away from the end point', 'warning');
                 return;
             }
             
             // Set the point
             if (!startPoint) {
-                setStartPoint(swissCoords, originalLatLng);
+                setStartPoint(wgs84Coords, originalLatLng);
                 showStatus('Start point set! Now click for end point', 'success');
             } else if (!endPoint) {
-                setEndPoint(swissCoords, originalLatLng);
+                setEndPoint(wgs84Coords, originalLatLng);
                 showStatus('End point set! Click "Calculate Route" to find the path', 'success');
             } else {
                 // Both points set, ask user what to do
                 if (confirm('Both start and end points are set. Click "OK" to set a new start point, or "Cancel" to set a new end point.')) {
                     clearPoint('start');
-                    setStartPoint(swissCoords, originalLatLng);
+                    setStartPoint(wgs84Coords, originalLatLng);
                 } else {
                     clearPoint('end');
-                    setEndPoint(swissCoords, originalLatLng);
+                    setEndPoint(wgs84Coords, originalLatLng);
                 }
             }
         }
         
         // Handle clicks in multi-point mode
-        function handleMultiPointClick(swissCoords, originalLatLng) {
+        function handleMultiPointClick(wgs84Coords, originalLatLng) {
             // Check if we're clicking too close to existing waypoints
             for (let waypoint of waypoints) {
-                if (isTooClose(swissCoords.x, swissCoords.y, waypoint.swiss.x, waypoint.swiss.y)) {
+                if (isTooClose(wgs84Coords.lat, wgs84Coords.lng, waypoint.lat, waypoint.lng)) {
                     showStatus('Click further away from existing waypoints', 'warning');
                     return;
                 }
@@ -944,9 +924,8 @@
             
             // Add new waypoint
             const waypoint = {
-                swiss: swissCoords,
-                lat: originalLatLng.lat,
-                lng: originalLatLng.lng,
+                lat: wgs84Coords.lat,
+                lng: wgs84Coords.lng,
                 marker: null
             };
             
@@ -970,12 +949,10 @@
             // Add drag event handlers
             marker.on('dragend', function(e) {
                 const newLatLng = e.target.getLatLng();
-                const newSwissCoords = map.options.crs.projection.project(newLatLng);
                 
                 // Update waypoint coordinates
                 waypoint.lat = newLatLng.lat;
                 waypoint.lng = newLatLng.lng;
-                waypoint.swiss = { x: Math.round(newSwissCoords.x), y: Math.round(newSwissCoords.y) };
                 
                 // Update waypoints display
                 updateWaypointsDisplay();
@@ -999,49 +976,25 @@
             showStatus(`Waypoint ${waypoints.length} added! Route will update automatically.`, 'success');
         }
         
-        // Simple coordinate conversion - much cleaner than complex math
-        function convertLatLngToSwiss(lat, lng) {
-            // This is still a simplified approach, but much cleaner
-            // In a production system, you'd use a proper coordinate transformation library
-            
-            // Switzerland bounds and LV95 ranges
-            const latMin = 45.8, latMax = 47.8;
-            const lngMin = 5.9, lngMax = 10.5;
-            const xMin = 2400000, xMax = 2900000;
-            const yMin = 1000000, yMax = 1300000;
-            
-            // Clamp coordinates to Switzerland bounds
-            const clampedLat = Math.max(latMin, Math.min(latMax, lat));
-            const clampedLng = Math.max(lngMin, Math.min(lngMax, lng));
-            
-            // Linear interpolation
-            const latRatio = (clampedLat - latMin) / (latMax - latMin);
-            const lngRatio = (clampedLng - lngMin) / (lngMax - lngMin);
-            
-            const x = xMin + lngRatio * (xMax - xMin);
-            const y = yMin + latRatio * (yMax - yMin);
-            
-            return { x: Math.round(x), y: Math.round(y) };
-        }
-        
-
-        
         // Check if two points are too close (less than 100m = 0.1km)
-        function isTooClose(x1, y1, x2, y2) {
-            const distance = Math.sqrt((x1 - x2)**2 + (y1 - y2)**2);
-            return distance < 100; // Reduced from 1000m to 100m for much closer points
+        function isTooClose(lat1, lng1, lat2, lng2) {
+            // Calculate distance in degrees (approximate)
+            const latDiff = lat1 - lat2;
+            const lngDiff = lng1 - lng2;
+            const distance = Math.sqrt(latDiff**2 + lngDiff**2);
+            return distance < 0.001; // Roughly 100m in degrees
         }
         
         // Set start point
-        function setStartPoint(swissCoords, originalLatLng) {
-            startPoint = { swiss: swissCoords };
+        function setStartPoint(wgs84Coords, originalLatLng) {
+            startPoint = { lat: wgs84Coords.lat, lng: wgs84Coords.lng };
             
             // Remove existing start marker
             if (startMarker) {
                 map.removeLayer(startMarker);
             }
             
-            // Use the original click coordinates for marker placement (no conversion needed!)
+            // Use the original click coordinates for marker placement
             startMarker = L.marker([originalLatLng.lat, originalLatLng.lng], {
                 icon: L.divIcon({
                     className: 'start-marker',
@@ -1051,24 +1004,24 @@
                 pane: 'markersPane'
             }).addTo(map);
             
-            // Update UI
+            // Update UI - show WGS84 coordinates
             document.getElementById('start-coords').textContent = 
-                `LV95: (${swissCoords.x.toFixed(0)}, ${swissCoords.y.toFixed(0)})`;
+                `WGS84: (${wgs84Coords.lat.toFixed(6)}, ${wgs84Coords.lng.toFixed(6)})`;
             
             updateCalculateButton();
             updateClippedArea();
         }
         
         // Set end point
-        function setEndPoint(swissCoords, originalLatLng) {
-            endPoint = { swiss: swissCoords };
+        function setEndPoint(wgs84Coords, originalLatLng) {
+            endPoint = { lat: wgs84Coords.lat, lng: wgs84Coords.lng };
             
             // Remove existing end marker
             if (endMarker) {
                 map.removeLayer(endMarker);
             }
             
-            // Use the original click coordinates for marker placement (no conversion needed!)
+            // Use the original click coordinates for marker placement
             endMarker = L.marker([originalLatLng.lat, originalLatLng.lng], {
                 icon: L.divIcon({
                     className: 'end-marker',
@@ -1078,9 +1031,9 @@
                 pane: 'markersPane'
             }).addTo(map);
             
-            // Update UI
+            // Update UI - show WGS84 coordinates
             document.getElementById('end-coords').textContent = 
-                `LV95: (${swissCoords.x.toFixed(0)}, ${swissCoords.y.toFixed(0)})`;
+                `WGS84: (${wgs84Coords.lat.toFixed(6)}, ${wgs84Coords.lng.toFixed(6)})`;
             
             updateCalculateButton();
             updateClippedArea();
@@ -1144,34 +1097,32 @@
                 map.removeLayer(clippedAreaPolygon);
             }
             
-            // Calculate bounding box with buffer in LV95 coordinates
-            const bufferMeters = bufferDistance * 1000;
+            // Calculate bounding box with buffer around the route
+            // Since we're working with WGS84 coordinates, we'll create a simple bounding box
+            const bufferDegrees = (bufferDistance * 1000) / 111000; // Rough conversion: 1 degree ≈ 111km
             
-            const minX = Math.min(startPoint.swiss.x, endPoint.swiss.x) - bufferMeters;
-            const maxX = Math.max(startPoint.swiss.x, endPoint.swiss.x) + bufferMeters;
-            const minY = Math.min(startPoint.swiss.y, endPoint.swiss.y) - bufferMeters;
-            const maxY = Math.max(startPoint.swiss.y, endPoint.swiss.y) + bufferMeters;
+            const minLat = Math.min(startPoint.lat, endPoint.lat) - bufferDegrees;
+            const maxLat = Math.max(startPoint.lat, endPoint.lat) + bufferDegrees;
+            const minLng = Math.min(startPoint.lng, endPoint.lng) - bufferDegrees;
+            const maxLng = Math.max(startPoint.lng, endPoint.lng) + bufferDegrees;
             
-            // Convert LV95 bounds to lat/lng using proper CRS transformation
-            const bounds = [
-                map.options.crs.projection.unproject({ x: minX, y: minY }), // bottom-left
-                map.options.crs.projection.unproject({ x: maxX, y: minY }), // bottom-right
-                map.options.crs.projection.unproject({ x: maxX, y: maxY }), // top-right
-                map.options.crs.projection.unproject({ x: minX, y: maxY })  // top-left
+            // Create bounding box coordinates
+            const boundsLatLng = [
+                [minLat, minLng], // bottom-left
+                [minLat, maxLng], // bottom-right
+                [maxLat, maxLng], // top-right
+                [maxLat, minLng]  // top-left
             ];
-            
-            // Extract lat/lng from the projected points
-            const boundsLatLng = bounds.map(point => [point.lat, point.lng]);
             
             clippedAreaPolygon = L.polygon(boundsLatLng, {
                 color: '#007bff',
-                weight: 3,           // Increased from 2 to 3 for better visibility
+                weight: 3,
                 fillColor: '#007bff',
-                fillOpacity: 0.15,   // Increased from 0.1 to 0.15 for better visibility
-                smoothFactor: 0,     // Set to 0 for maximum precision
-                lineCap: 'round',    // Rounded line ends
-                lineJoin: 'round',   // Rounded line joins
-                renderer: L.canvas() // Use canvas renderer for better quality
+                fillOpacity: 0.15,
+                smoothFactor: 0,
+                lineCap: 'round',
+                lineJoin: 'round',
+                renderer: L.canvas()
             }).addTo(map);
             
             // Fit map to show the clipped area
@@ -1192,19 +1143,19 @@
                 // Get selected network type
                 const networkType = document.querySelector('input[name="network-type"]:checked').value;
                 
-                // Prepare data for backend
+                // Prepare data for backend - send WGS84 coordinates
                 const routeData = {
-                    start_coords: [startPoint.swiss.x, startPoint.swiss.y],
-                    end_coords: [endPoint.swiss.x, endPoint.swiss.y],
+                    start_coords: [startPoint.lat, startPoint.lng], // WGS84: [latitude, longitude]
+                    end_coords: [endPoint.lat, endPoint.lng],       // WGS84: [latitude, longitude]
                     buffer_distance: bufferDistance * 1000, // Convert to meters
                     network_type: networkType
                 };
                 
-                console.log('Sending route data to backend:', routeData);
-                console.log('Start point object:', startPoint);
-                console.log('End point object:', endPoint);
+                console.log('Sending WGS84 coordinates to backend:', routeData);
+                console.log('Start point (WGS84):', startPoint);
+                console.log('End point (WGS84):', endPoint);
                 
-                // Call Python backend (you'll need to set up a simple web server)
+                // Call Python backend
                 const response = await fetch('/calculate_route', {
                     method: 'POST',
                     headers: {
@@ -1258,9 +1209,10 @@
                     // Get selected network type
                     const networkType = document.querySelector('input[name="network-type"]:checked').value;
                     
+                    // Send WGS84 coordinates to backend
                     const routeData = {
-                        start_coords: [start.swiss.x, start.swiss.y],
-                        end_coords: [end.swiss.x, end.swiss.y],
+                        start_coords: [start.lat, start.lng], // WGS84: [latitude, longitude]
+                        end_coords: [end.lat, end.lng],       // WGS84: [latitude, longitude]
                         buffer_distance: bufferDistance * 1000,
                         network_type: networkType
                     };
@@ -1523,14 +1475,14 @@
         function updateStartEndDisplay() {
             if (startPoint) {
                 document.getElementById('start-coords').textContent = 
-                    `LV95: (${startPoint.swiss.x.toFixed(0)}, ${startPoint.swiss.y.toFixed(0)})`;
+                    `WGS84: (${startPoint.lat.toFixed(6)}, ${startPoint.lng.toFixed(6)})`;
             } else {
                 document.getElementById('start-coords').textContent = 'Not set';
             }
             
             if (endPoint) {
                 document.getElementById('end-coords').textContent = 
-                    `LV95: (${endPoint.swiss.x.toFixed(0)}, ${endPoint.swiss.y.toFixed(0)})`;
+                    `WGS84: (${endPoint.lat.toFixed(6)}, ${endPoint.lng.toFixed(6)})`;
             } else {
                 document.getElementById('end-coords').textContent = 'Not set';
             }

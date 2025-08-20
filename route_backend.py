@@ -5,6 +5,7 @@ import pandas as pd
 from shapely.geometry import Point, box, LineString
 from shapely.ops import unary_union
 import numpy as np
+import momepy
 
 # --- Configuration ---
 # Updated path to your actual GeoPackage file
@@ -270,153 +271,44 @@ def create_clipped_network(start_coords, end_coords, buffer_distance=5000, netwo
 
 def load_network_to_graph(gdf):
     """
-    Loads a road network from a GeoDataFrame into a NetworkX graph.
-    Simple, reliable approach that works for both roads and ski routes.
+    Loads a road network from a GeoDataFrame into a NetworkX graph using momepy.
+    Clean, robust implementation that handles all geometry types automatically.
     """
     if gdf is None or len(gdf) == 0:
         print("Error: No road data to process")
         return None
 
-    print("Creating network graph from clipped data...")
+    print("Creating network graph using momepy...")
     
-    # Create an empty graph
-    G = nx.Graph()
-    
-    # Track processed geometries for debugging
-    processed_count = 0
-    error_count = 0
-
-    # Pre-process MultiLineString geometries using WKT conversion
-    print("Pre-processing MultiLineString geometries using WKT...")
-    processed_gdf = gdf.copy()
-    
-    for index, row in processed_gdf.iterrows():
-        try:
-            line = row.geometry
-            if line.geom_type == 'MultiLineString':
-                # Convert MultiLineString to individual LineStrings using WKT
-                from shapely import wkt
-                from shapely.geometry import LineString
-                
-                try:
-                    # Convert to WKT and back to bypass the Sub-geometries error
-                    wkt_string = line.wkt
-                    reconstructed_geom = wkt.loads(wkt_string)
-                    
-                    # Now try to extract individual parts
-                    line_strings = []
-                    if reconstructed_geom.geom_type == 'MultiLineString':
-                        # Extract each part of the MultiLineString
-                        for part in reconstructed_geom.geoms:
-                            if part.is_valid and part.geom_type == 'LineString':
-                                coords = list(part.coords)
-                                if len(coords) >= 2:
-                                    line_strings.append(LineString(coords))
-                                    
-                        # Use the first valid LineString
-                        if line_strings:
-                            processed_gdf.at[index, 'geometry'] = line_strings[0]
-                            print(f"WKT: Converted MultiLineString to LineString at index {index}")
-                        else:
-                            # Fallback: convert entire MultiLineString to single LineString
-                            all_coords = []
-                            for part in reconstructed_geom.geoms:
-                                if part.geom_type == 'LineString':
-                                    all_coords.extend(list(part.coords))
-                            if len(all_coords) >= 2:
-                                processed_gdf.at[index, 'geometry'] = LineString(all_coords)
-                                print(f"WKT: Converted MultiLineString to single LineString at index {index}")
-                            else:
-                                print(f"WKT: Could not extract valid coordinates from MultiLineString at index {index}")
-                                continue
-                    else:
-                        # If it's not a MultiLineString after WKT conversion, use it directly
-                        processed_gdf.at[index, 'geometry'] = reconstructed_geom
-                        print(f"WKT: Geometry became {reconstructed_geom.geom_type} at index {index}")
-                        
-                except Exception as e:
-                    print(f"WKT conversion failed for index {index}: {e}")
-                    # Last resort: try to create a simple LineString from bounds
-                    try:
-                        bounds = line.bounds
-                        if len(bounds) == 4:
-                            # Create a simple LineString from bounds (not ideal but better than nothing)
-                            simple_line = LineString([(bounds[0], bounds[1]), (bounds[2], bounds[3])])
-                            processed_gdf.at[index, 'geometry'] = simple_line
-                            print(f"Fallback: Created simple LineString from bounds at index {index}")
-                        else:
-                            print(f"Could not create fallback geometry for index {index}")
-                            continue
-                    except Exception as e2:
-                        print(f"Fallback also failed for index {index}: {e2}")
-                        continue
-                        
-        except Exception as e:
-            print(f"Error pre-processing MultiLineString at index {index}: {e}")
-            continue
-
-    # Now process the pre-processed GeoDataFrame - simple approach
-    print("Processing pre-processed geometries...")
-    
-    for index, row in processed_gdf.iterrows():
-        try:
-            line = row.geometry
-            
-            # Skip invalid geometries
-            if line is None or not line.is_valid:
-                print(f"Skipping invalid geometry at index {index}")
-                continue
-                
-            # Handle line geometry
-            if hasattr(line, 'coords') and line.geom_type == 'LineString':
-                coords = list(line.coords)
-                if len(coords) >= 2:
-                    # Ensure coordinates are valid numbers
-                    start_coords = coords[0]
-                    end_coords = coords[-1]
-                    
-                    if (isinstance(start_coords[0], (int, float)) and 
-                        isinstance(start_coords[1], (int, float)) and
-                        isinstance(end_coords[0], (int, float)) and 
-                        isinstance(end_coords[1], (int, float))):
-                        
-                        start_node = tuple(start_coords)
-                        end_node = tuple(end_coords)
-                        
-                        # Calculate length in meters (assuming coordinates are in meters)
-                        length = line.length
-                        
-                        # Add the edge to the graph with its length as the weight
-                        # Remove geometry from row data to avoid conflicts
-                        row_data = row.to_dict()
-                        if 'geometry' in row_data:
-                            del row_data['geometry']
-                        
-                        G.add_edge(start_node, end_node, weight=length, geometry=line, **row_data)
-                        processed_count += 1
-                    else:
-                        print(f"Invalid coordinate types at index {index}: {start_coords}, {end_coords}")
-                        error_count += 1
-                else:
-                    print(f"LineString at index {index} has insufficient coordinates: {len(coords)}")
-                    error_count += 1
-            else:
-                print(f"Unexpected geometry type: {line.geom_type} at index {index}")
-                error_count += 1
-                    
-        except Exception as e:
-            print(f"Error processing geometry at index {index}: {e}")
-            error_count += 1
-            continue
-
-    print(f"Graph created with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
-    print(f"Processed {processed_count} geometries successfully, {error_count} errors")
-    
-    if G.number_of_edges() == 0:
-        print("Warning: No edges were created. Check geometry data.")
-        return None
+    try:
+        # Ensure we have a length column for momepy
+        if 'length' not in gdf.columns:
+            gdf = gdf.copy()
+            gdf['length'] = gdf.geometry.length
         
-    return G
+        # Use momepy to convert GeoDataFrame to NetworkX graph
+        # momepy handles MultiLineString geometries automatically
+        G = momepy.gdf_to_nx(gdf, approach='primal', length='length')
+        
+        print(f"Graph created with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.")
+        
+        # Add geometry data to edges for routing
+        for u, v, data in G.edges(data=True):
+            # Find the corresponding geometry from the original GeoDataFrame
+            edge_geom = gdf.iloc[data.get('momepy_idx', 0)].geometry
+            data['geometry'] = edge_geom
+            
+            # Ensure we have proper weight for routing
+            if 'length' in data and data['length'] is not None:
+                data['weight'] = data['length']
+            else:
+                data['weight'] = edge_geom.length
+        
+        return G
+        
+    except Exception as e:
+        print(f"Error creating network graph with momepy: {e}")
+        return None
 
 def create_intersection_connections(graph, intersection_point, network_gdf, intersection_data):
     """
@@ -460,12 +352,10 @@ def create_intersection_connections(graph, intersection_point, network_gdf, inte
 def find_nearest_node(graph, point, max_search_distance=1000):
     """
     Finds the nearest point on the nearest route segment to the given coordinates.
-    This allows starting/ending anywhere along a route, not just at junctions.
-    Works for both roads and ski routes.
+    Uses spatial indexing for efficient nearest edge finding.
     """
-    nearest_point = None
-    min_dist = float('inf')
-    nearest_edge = None
+    from shapely.ops import nearest_points
+    from shapely.geometry import Point as ShapelyPoint
     
     # Convert to tuple for consistency
     query_point = tuple(point)
@@ -473,102 +363,53 @@ def find_nearest_node(graph, point, max_search_distance=1000):
     print(f"Searching for nearest point on route segments within {max_search_distance}m of {query_point}")
     print(f"Graph has {graph.number_of_edges()} edges to check")
     
-    # Check all edges (route segments) to find the closest point on any route
-    for u, v, data in graph.edges(data=True):
-        if 'geometry' in data:
-            # Get the route geometry
-            route_geometry = data['geometry']
-            
-            # Find the closest point on this route segment
-            try:
-                # Handle different geometry types
-                if route_geometry.geom_type == 'LineString':
-                    # Project the query point onto the route geometry
-                    closest_point = route_geometry.interpolate(route_geometry.project(Point(query_point)))
-                    dist = Point(query_point).distance(closest_point)
-                    
-                    if dist < min_dist and dist <= max_search_distance:
-                        min_dist = dist
-                        nearest_point = closest_point
-                        nearest_edge = (u, v, data)
-                        print(f"  New closest: {closest_point.coords[0]} at {dist:.2f}m")
-                        
-                elif route_geometry.geom_type == 'MultiLineString':
-                    # For MultiLineString, check each part
-                    for part in route_geometry.geoms:
-                        try:
-                            closest_point = part.interpolate(part.project(Point(query_point)))
-                            dist = Point(query_point).distance(closest_point)
-                            
-                            if dist < min_dist and dist <= max_search_distance:
-                                min_dist = dist
-                                nearest_point = closest_point
-                                nearest_edge = (u, v, data)
-                                print(f"  New closest (MultiLineString): {closest_point.coords[0]} at {dist:.2f}m")
-                        except Exception as e:
-                            continue
-                            
-            except Exception as e:
-                print(f"  Error processing edge {u}->{v}: {e}")
-                continue
-        else:
-            print(f"  Edge {u}->{v} has no geometry data")
-    
-    if nearest_point is not None:
-        try:
-            if nearest_point.geom_type == 'Point':
-                coords = list(nearest_point.coords)[0]
-            elif nearest_point.geom_type == 'LineString':
-                coords = list(nearest_point.coords)[0]
-            elif nearest_point.geom_type == 'MultiLineString':
-                # For MultiLineString, get the first coordinate of the first part
-                coords = list(nearest_point.geoms[0].coords)[0]
-            else:
-                # Fallback for other geometry types
-                coords = (nearest_point.x, nearest_point.y) if hasattr(nearest_point, 'x') else tuple(nearest_point.coords[0])
-            
-            print(f"✅ Found nearest point on route at {coords} (distance: {min_dist:.2f}m)")
-            return coords
-        except Exception as e:
-            print(f"Error extracting coordinates from nearest point: {e}")
-            # Fallback: return the point as a tuple if possible
-            if hasattr(nearest_point, 'x') and hasattr(nearest_point, 'y'):
-                return (nearest_point.x, nearest_point.y)
-            else:
-                return None
-    else:
-        # No route segments found - this should not happen if the graph is properly constructed
-        print("❌ No route segments found with geometry data. Check graph construction.")
-        return None
-
-def find_nearest_node_fallback(graph, point, max_search_distance=1000):
-    """
-    Fallback method to find the nearest node if no road segments are available.
-    """
-    nearest_node = None
-    min_dist = float('inf')
-    
-    # Convert to tuple for consistency
-    query_point = tuple(point)
-    
-    for node in graph.nodes():
-        # Calculate distance between coordinate tuples
-        dist = np.sqrt((node[0] - query_point[0])**2 + (node[1] - query_point[1])**2)
+    try:
+        # Create a GeoSeries of all edges in the graph for spatial indexing
+        edge_geometries = []
+        edge_data_list = []
         
-        # Early exit if we're too far
-        if dist > max_search_distance:
-            continue
+        for u, v, data in graph.edges(data=True):
+            if 'geometry' in data:
+                edge_geometries.append(data['geometry'])
+                edge_data_list.append((u, v, data))
+        
+        if not edge_geometries:
+            print("No edges with geometry data found")
+            return None
+        
+        # Create GeoSeries for spatial operations
+        edges_gseries = gpd.GeoSeries(edge_geometries)
+        
+        # Find the nearest edge using spatial indexing
+        query_shapely_point = ShapelyPoint(query_point)
+        
+        # Use nearest_points to find the closest edge
+        nearest_edge_geom = nearest_points(query_shapely_point, edges_gseries.unary_union)[1]
+        
+        # Find the closest point on that edge
+        nearest_point_on_edge = nearest_edge_geom.interpolate(
+            nearest_edge_geom.project(query_shapely_point)
+        )
+        
+        # Calculate distance to verify it's within search range
+        distance = query_shapely_point.distance(nearest_point_on_edge)
+        
+        if distance <= max_search_distance:
+            # Extract coordinates
+            if hasattr(nearest_point_on_edge, 'coords'):
+                coords = list(nearest_point_on_edge.coords)[0]
+            else:
+                coords = (nearest_point_on_edge.x, nearest_point_on_edge.y)
             
-        if dist < min_dist:
-            min_dist = dist
-            nearest_node = node
+            print(f"✅ Found nearest point on route at {coords} (distance: {distance:.2f}m)")
+            return coords
+        else:
+            print(f"❌ Nearest edge found at {distance:.2f}m, but exceeds search limit of {max_search_distance}m")
+            return None
             
-    if nearest_node:
-        print(f"Nearest node found at a distance of {min_dist:.2f} meters.")
-    else:
-        print(f"No node found within {max_search_distance} meters. Try increasing buffer distance.")
-    
-    return nearest_node
+    except Exception as e:
+        print(f"Error in spatial search: {e}")
+        return None
 
 def connect_point_to_network(graph, point, point_type):
     """
@@ -732,11 +573,12 @@ def main_route_calculation(start_coords, end_coords, buffer_distance=5000, netwo
     segments_loaded = len(clipped_gdf)
     print(f"Loaded {segments_loaded} {network_type} segments for routing")
     
-    # Step 2: Convert to NetworkX graph
+    # Step 2: Convert to NetworkX graph using momepy
+    print("Creating network graph using momepy...")
     network_graph = load_network_to_graph(clipped_gdf)
     
     if network_graph is None:
-        print("Failed to create network graph")
+        print("Failed to create network graph with momepy")
         return None, None, segments_loaded
     
     # Step 3: Calculate the path
