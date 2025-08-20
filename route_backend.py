@@ -142,11 +142,12 @@ def load_preprocessed_network(network_type='tlm3d'):
         print(f"Error loading pre-processed network: {e}")
         return None
 
-def create_clipped_network_from_graph(graph, start_coords, end_coords, buffer_distance=5000):
-    """
-    Creates a clipped network by filtering the pre-processed graph.
-    This is much more efficient than clipping geometries.
-    """
+# REMOVED: This function is no longer needed with the new clipping-first approach
+# def create_clipped_network_from_graph(graph, start_coords, end_coords, buffer_distance=5000):
+#     """
+#     Creates a clipped network by filtering the pre-processed graph.
+#     This is much more efficient than clipping geometries.
+#     """
     print(f"Creating clipped network with buffer distance: {buffer_distance} meters")
     
     # Create bounding box
@@ -230,6 +231,8 @@ def create_clipped_network_from_graph(graph, start_coords, end_coords, buffer_di
     else:
         print("❌ No edges found in clipping area")
         return None
+    
+    # END OF REMOVED FUNCTION
 
 def find_network_intersections(road_gdf, ski_gdf, tolerance=10):
     """
@@ -901,72 +904,36 @@ def calculate_shortest_path(graph, start_coords, end_coords):
 
 def main_route_calculation(start_coords, end_coords, buffer_distance=5000, network_type='tlm3d'):
     """
-    Main function that orchestrates the entire routing process using pre-processed networks.
-    Now supports two network types: TLM3D (roads/trails) and ski touring.
+    Main function that orchestrates the entire routing process.
+    Clips the network FIRST, then creates the graph.
     """
     print(f"=== SWISS {network_type.upper()} Route Optimization ===")
     print(f"Start point: {start_coords}")
     print(f"End point: {end_coords}")
     print(f"Buffer distance: {buffer_distance} meters")
     print(f"Network type: {network_type}")
-    
-    # Step 1: Load pre-processed network (no clipping needed)
-    print("Loading pre-processed network...")
-    network_gdf = load_preprocessed_network(network_type)
-    
-    if network_gdf is None:
-        print("Failed to load pre-processed network")
-        return None, None, 0
-    
-    segments_loaded = len(network_gdf)
-    print(f"Loaded {segments_loaded} {network_type} segments")
-    
-    # Step 2: Convert to NetworkX graph using momepy
-    print("Creating network graph using momepy...")
-    full_network_graph = load_network_to_graph(network_gdf)
-    
-    if full_network_graph is None:
-        print("Failed to create network graph with momepy")
-        return None, None, segments_loaded
-    
-    # Step 3: Create clipped subgraph for routing (much more efficient)
-    print("Creating clipped subgraph for routing...")
-    clipped_graph = create_clipped_network_from_graph(
-        full_network_graph, start_coords, end_coords, buffer_distance
-    )
-    
-    if clipped_graph is None or clipped_graph.number_of_edges() == 0:
-        print("Failed to create clipped subgraph")
-        return None, None, segments_loaded
-    
-    # Debug: Check the weights of the clipped network edges
-    print(f"\\n=== DEBUGGING CLIPPED NETWORK ===")
-    print(f"Clipped network has {clipped_graph.number_of_edges()} edges")
-    
-    # Sample some edge weights to see what we're working with
-    edge_weights = []
-    for u, v, data in clipped_graph.edges(data=True):
-        if 'weight' in data:
-            edge_weights.append(data['weight'])
-    
-    if edge_weights:
-        print(f"Edge weight statistics:")
-        print(f"  Min weight: {min(edge_weights):.2f}m")
-        print(f"  Max weight: {max(edge_weights):.2f}m")
-        print(f"  Average weight: {sum(edge_weights)/len(edge_weights):.2f}m")
-        
-        # Show first few edges
-        print(f"\\nFirst 5 edges:")
-        for i, (u, v, data) in enumerate(list(clipped_graph.edges(data=True))[:5]):
-            weight = data.get('weight', 'unknown')
-            has_geom = 'geometry' in data
-            print(f"  Edge {i}: {u} -> {v}, weight: {weight}, has_geometry: {has_geom}")
-    else:
-        print("No edge weights found in clipped network")
 
-    # Step 4: Calculate the path using the clipped subgraph
-    route_geometry, path_length = calculate_shortest_path(clipped_graph, start_coords, end_coords)
-    
+    # Step 1: Create a clipped network GeoDataFrame (This is the key change)
+    clipped_gdf = create_clipped_network(start_coords, end_coords, buffer_distance, network_type)
+
+    if clipped_gdf is None or clipped_gdf.empty:
+        print("Failed to create clipped network. No data in the bounding box.")
+        return None, None, 0
+
+    segments_loaded = len(clipped_gdf)
+    print(f"Loaded {segments_loaded} {network_type} segments in the clipped area.")
+
+    # Step 2: Convert the SMALL, CLIPPED GeoDataFrame to a NetworkX graph
+    print("Creating network graph from the clipped data...")
+    network_graph = load_network_to_graph(clipped_gdf)
+
+    if network_graph is None:
+        print("Failed to create network graph.")
+        return None, None, segments_loaded
+
+    # Step 3: Calculate the path using the clipped graph
+    route_geometry, path_length = calculate_shortest_path(network_graph, start_coords, end_coords)
+
     return route_geometry, path_length, segments_loaded
 
 # --- Main Execution ---
