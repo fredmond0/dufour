@@ -158,16 +158,28 @@ def add_point_to_graph(graph, point, edge):
     if point.distance(Point(node_v)) < 1e-6: 
         return node_v
 
-    graph.remove_edge(node_u, node_v)
+    # --- Start of new logic ---
+    # Split the original geometry into two parts at the new point
+    parts = split(edge_geom, point)
+    geom1 = parts.geoms[0]
+    geom2 = parts.geoms[1]
+
+    # Determine which new geometry piece connects to which original node
+    if geom1.distance(Point(node_u)) < 1e-9:
+        geom_u, geom_v = geom1, geom2
+    else:
+        geom_u, geom_v = geom2, geom1
+    # --- End of new logic ---
+
+    # Remove the original edge (must specify key=0 for a MultiGraph)
+    graph.remove_edge(node_u, node_v, key=0)
     
     new_node = tuple(point.coords)[0]
-    
     graph.add_node(new_node)
     
-    dist_u = point.distance(Point(node_u))
-    dist_v = point.distance(Point(node_v))
-    graph.add_edge(node_u, new_node, weight=dist_u, geometry=LineString([Point(node_u), point]))
-    graph.add_edge(new_node, node_v, weight=dist_v, geometry=LineString([point, Point(node_v)]))
+    # Add two new edges, using the real split geometries and their lengths
+    graph.add_edge(node_u, new_node, weight=geom_u.length, geometry=geom_u)
+    graph.add_edge(new_node, node_v, weight=geom_v.length, geometry=geom_v)
     
     return new_node
 
@@ -185,24 +197,36 @@ def calculate_shortest_path(graph, start_coords, end_coords):
 
     if start_edge == end_edge:
         print("--- Intra-edge route detected ---")
-        # Fix: NetworkX expects graph.edges[u, v], not graph.edges[(u, v)]
         node_u, node_v = start_edge
-        line = temp_graph[node_u][node_v][0]['geometry']  # MultiGraph: access first edge at index 0
-        start_dist = line.project(start_snap)
-        end_dist = line.project(end_snap)
+        line = temp_graph[node_u][node_v][0]['geometry']
         
-        splitter = MultiPoint([line.interpolate(start_dist), line.interpolate(end_dist)])
-        
-        try:
-            parts = split(line, splitter)
+        # Project the original user coordinates onto the line to find their distance along it
+        start_dist = line.project(Point(start_coords))
+        end_dist = line.project(Point(end_coords))
+
+        # Ensure start_dist is less than end_dist
+        if start_dist > end_dist:
+            start_dist, end_dist = end_dist, start_dist
             
-            for i, part in enumerate(parts.geoms):
-                if part.distance(start_snap) < 1e-9 and part.distance(end_snap) < 1e-9:
-                    result = (list(part.coords), part.length)
-                    return result
-        except Exception as e:
-            return None
-        return None
+        # Get the actual start and end points on the line
+        p_start = line.interpolate(start_dist)
+        p_end = line.interpolate(end_dist)
+
+        # Build the new list of coordinates for the sub-path
+        new_coords = [tuple(p_start.coords)[0]]
+        
+        # Add all original vertices that lie between the start and end points
+        for coord in list(line.coords):
+            p_dist = line.project(Point(coord))
+            if p_dist > start_dist and p_dist < end_dist:
+                new_coords.append(coord)
+                
+        new_coords.append(tuple(p_end.coords)[0])
+        
+        # Create the new LineString from the extracted coordinates
+        route_geom = LineString(new_coords)
+        
+        return (list(route_geom.coords), route_geom.length)
 
     start_node = add_point_to_graph(temp_graph, start_snap, start_edge)
     end_node = add_point_to_graph(temp_graph, end_snap, end_edge)
@@ -214,19 +238,23 @@ def calculate_shortest_path(graph, start_coords, end_coords):
         route_geometry = []
         for i in range(len(path_nodes) - 1):
             u, v = path_nodes[i], path_nodes[i+1]
-            edge_data = temp_graph.get_edge_data(u, v)[0]  # MultiGraph: access first edge at index 0
-            print(f"DEBUG: Edge {i}: u={u}, v={v}, edge_data={edge_data}")
-            if 'geometry' in edge_data:
-                coords = list(edge_data['geometry'].coords)  # Now we can access geometry directly
-                print(f"DEBUG: Got coords: {len(coords)} points")
-                if Point(coords[0]).distance(Point(u)) > Point(coords[-1]).distance(Point(u)):
-                    coords.reverse()
-                if not route_geometry or coords[0] != route_geometry[-1]:
-                    route_geometry.extend(coords)
+            edge_data_view = temp_graph.get_edge_data(u, v)
+            
+            # Check if we have any edge data and safely access the first edge
+            if edge_data_view and len(edge_data_view) > 0:
+                edge_data = edge_data_view[0]  # MultiGraph: access first edge at index 0
+                if 'geometry' in edge_data:
+                    coords = list(edge_data['geometry'].coords)  # Now we can access geometry directly
+                    if Point(coords[0]).distance(Point(u)) > Point(coords[-1]).distance(Point(u)):
+                        coords.reverse()
+                    if not route_geometry or coords[0] != route_geometry[-1]:
+                        route_geometry.extend(coords)
+                    else:
+                        route_geometry.extend(coords[1:])
                 else:
-                    route_geometry.extend(coords[1:])
+                    print(f"Warning: Edge {i} missing geometry data")
             else:
-                print(f"DEBUG: No geometry found for edge {i}")
+                print(f"Warning: No edge data found for edge {i} between {u} and {v}")
         
         result = (route_geometry, path_length)
         return result
