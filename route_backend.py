@@ -7,16 +7,19 @@ import pandas as pd
 from shapely.geometry import Point, box, LineString
 from shapely.ops import nearest_points
 import momepy
+from pyproj import Transformer
 
 # --- Configuration ---
 PREPROCESSED_TLM3D_PATH = './data/preprocessed/tlm3d_network_processed.gpkg'
-PREPROCESSED_SKI_PATH = './data/skitouring/cleaningtesting/cleaned_network.gpkg'
+PREPROCESSED_SKI_PATH = './data/preprocessed/ski_network_processed.gpkg'
+PREPROCESSED_SAC_PATH = './data/preprocessed/sac_network_processed.gpkg'
 
 def create_clipped_network(start_coords, end_coords, buffer_distance, network_type):
     """Creates a clipped GeoDataFrame from a pre-processed file."""
     filepath = {
         'tlm3d': PREPROCESSED_TLM3D_PATH,
-        'ski_touring': PREPROCESSED_SKI_PATH
+        'ski_touring': PREPROCESSED_SKI_PATH,
+        'sac_alpine': PREPROCESSED_SAC_PATH
     }.get(network_type)
     if not filepath:
         return None
@@ -117,7 +120,7 @@ def fetch_elevations_for_coordinates(coordinates_2d, chunk_size=100):
         if isinstance(data, list) and len(data) > 0:
             return [(p['easting'], p['northing'], p['alts']['COMB']) for p in data if 'alts' in p]
     except Exception as e:
-        print(f"Warning: Failed to fetch elevation profile: {e}")
+        print(f"⚠️ Elevation profile unavailable")
     return []
 
 def calculate_elevation_profile(coordinates_3d):
@@ -282,15 +285,47 @@ def calculate_shortest_path(graph, start_coords, end_coords):
     
     # Check if both points are on the same segment
     if start_idx == end_idx:
-        print("    ⚠️ Both points on same segment - creating direct route")
-        # Create a direct line segment between the two snap points
-        from shapely.geometry import LineString
-        direct_line = LineString([start_snap_point.coords[0], end_snap_point.coords[0]])
-        direct_length = direct_line.length
+        print("    ⚠️ Both points on same segment - extracting geometry between projected points")
         
-        # Return direct route without graph processing
-        route_geometry = [start_coords, end_coords]
-        return route_geometry, direct_length
+        # Get the original segment geometry
+        original_segment = start_segment  # Same as end_segment since start_idx == end_idx
+        
+        # Calculate the projected distances along the segment
+        start_distance = original_segment.project(start_snap_point)
+        end_distance = original_segment.project(end_snap_point)
+        
+        # Ensure start_distance < end_distance for proper extraction
+        if start_distance > end_distance:
+            start_distance, end_distance = end_distance, start_distance
+            start_snap_point, end_snap_point = end_snap_point, start_snap_point
+        
+        print(f"    Extracting geometry from {start_distance:.1f}m to {end_distance:.1f}m along segment")
+        
+        # Extract the geometry between the two points using interpolate
+        from shapely.geometry import LineString
+        from shapely.ops import substring
+        
+        try:
+            # Use substring to get the portion of the line between the two distances
+            route_segment = substring(original_segment, start_distance, end_distance)
+            
+            if route_segment.geom_type == 'LineString' and route_segment.length > 0.1:
+                # Extract coordinates in LV95 (same as regular routing flow)
+                route_coords = list(route_segment.coords)
+                route_length = route_segment.length
+                print(f"    ✅ Extracted {len(route_coords)} coordinates, length: {route_length:.1f}m")
+                return route_coords, route_length
+            else:
+                print("    ⚠️ Substring extraction failed, using direct line")
+                # Fallback to direct line in LV95 coordinates
+                route_geometry = [start_snap_point.coords[0], end_snap_point.coords[0]]
+                return route_geometry, start_snap_point.distance(end_snap_point)
+                
+        except Exception as e:
+            print(f"    ❌ Error extracting segment geometry: {e}")
+            # Fallback to direct line in LV95 coordinates
+            route_geometry = [start_snap_point.coords[0], end_snap_point.coords[0]]
+            return route_geometry, start_snap_point.distance(end_snap_point)
     
     # Split segments (only if different segments)
     print("  Splitting segments...")

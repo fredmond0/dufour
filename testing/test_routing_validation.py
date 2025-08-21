@@ -17,6 +17,9 @@ import momepy
 import matplotlib.pyplot as plt
 from shapely.geometry import Point, LineString
 import pandas as pd
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from route_backend import calculate_route_from_gpkg
 
 def test_coordinate_pair(start_coords, end_coords, pair_name):

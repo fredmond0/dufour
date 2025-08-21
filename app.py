@@ -2,6 +2,8 @@
 from flask import Flask, request, jsonify, send_from_directory
 from route_backend import calculate_route_from_gpkg
 from pyproj import Transformer
+import geopandas as gpd
+import os
 
 app = Flask(__name__)
 
@@ -91,6 +93,38 @@ def calculate_route():
         import traceback
         traceback.print_exc()
         return jsonify({'success': False, 'error': 'An internal error occurred.'}), 500
+
+@app.route('/sac_routes', methods=['GET'])
+def get_sac_routes():
+    """Returns SAC Alpine routes as GeoJSON for map display."""
+    print("🏔️ SAC routes endpoint hit!")
+    
+    try:
+        sac_file = './data/preprocessed/sac_network_processed.gpkg'
+        
+        if not os.path.exists(sac_file):
+            print(f"❌ SAC routes file not found: {sac_file}")
+            return jsonify({'success': False, 'error': 'SAC routes file not found'}), 404
+        
+        # Load SAC routes
+        print(f"📂 Loading SAC routes from: {sac_file}")
+        gdf = gpd.read_file(sac_file)
+        
+        # Convert to WGS84 for Leaflet
+        if gdf.crs != 'EPSG:4326':
+            gdf = gdf.to_crs('EPSG:4326')
+        
+        # Convert to GeoJSON
+        geojson = gdf.to_json()
+        
+        print(f"✅ Loaded {len(gdf)} SAC Alpine routes")
+        return jsonify({'success': True, 'geojson': geojson})
+        
+    except Exception as e:
+        print(f"❌ Error loading SAC routes: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 if __name__ == '__main__':
     print("🚀 Starting Swiss Route Planner Server...")
