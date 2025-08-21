@@ -28,9 +28,12 @@ def index():
 @app.route('/calculate_route', methods=['POST'])
 def calculate_route():
     """Handles route calculation requests from the frontend."""
+    print("🔥 Route calculation endpoint hit!")
     try:
         data = request.get_json()
+        print(f"📨 Received data: {data}")
         if not data:
+            print("❌ No data received")
             return jsonify({'success': False, 'error': 'No data received'}), 400
 
         start_coords_wgs = data.get('start_coords')
@@ -52,16 +55,20 @@ def calculate_route():
         end_lv95 = (end_x, end_y)
 
         # Call the single, reliable "golden routing function" from the backend
+        print(f"🗺️ Calling route calculation with: start={start_lv95}, end={end_lv95}, buffer={buffer_distance}, type={network_type}")
         result = calculate_route_from_gpkg(
             start_lv95,
             end_lv95,
             buffer_distance,
             network_type
         )
+        print(f"🎯 Route calculation result: {type(result)}, length: {len(result) if result else 'None'}")
         
         try:
             shortest_path, path_length, segments_loaded, elevation_profile = result
+            print(f"✅ Successfully unpacked result: path={bool(shortest_path)}, length={path_length}, segments={segments_loaded}")
         except Exception as e:
+            print(f"❌ Failed to unpack result: {e}")
             return jsonify({'success': False, 'error': f'Internal unpacking error: {e}'}), 500
 
         if shortest_path:
@@ -80,7 +87,9 @@ def calculate_route():
             }), 404
 
     except Exception as e:
-        print(f"An unexpected error occurred in route calculation: {e}")
+        print(f"💥 An unexpected error occurred in route calculation: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'error': 'An internal error occurred.'}), 500
 
 if __name__ == '__main__':
