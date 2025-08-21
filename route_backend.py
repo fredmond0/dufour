@@ -41,7 +41,7 @@ def create_clipped_network(start_coords, end_coords, buffer_distance, network_ty
         return None
 
 def load_network_to_graph(gdf):
-    """Converts a GeoDataFrame into a NetworkX graph."""
+    """Converts a GeoDataFrame into a NetworkX graph with preserved geometry."""
     print("Creating network graph using momepy...")
     gdf = gdf.reset_index(drop=True)
     if 'length' not in gdf.columns:
@@ -50,7 +50,47 @@ def load_network_to_graph(gdf):
     # Create graph with geometry preservation
     graph = momepy.gdf_to_nx(gdf, approach='primal', length='length', multigraph=True)
     
+    # CRITICAL: Manually preserve detailed geometry in edges
+    print("Preserving detailed geometry in graph edges...")
+    geometry_preserved = 0
+    
+    for u, v, key, data in graph.edges(keys=True, data=True):
+        # Find the corresponding edge in the original GDF
+        edge_found = False
+        
+        for idx, row in gdf.iterrows():
+            edge_geom = row.geometry
+            if edge_geom.geom_type == 'LineString':
+                # Check if this edge connects nodes u and v
+                coords = list(edge_geom.coords)
+                start_point = Point(coords[0])
+                end_point = Point(coords[-1])
+                
+                u_point = Point(graph.nodes[u]['x'], graph.nodes[u]['y'])
+                v_point = Point(graph.nodes[v]['x'], graph.nodes[v]['y'])
+                
+                # Check if edge endpoints match graph nodes (within tolerance)
+                tolerance = 1.0  # 1 meter tolerance
+                
+                if ((start_point.distance(u_point) < tolerance and end_point.distance(v_point) < tolerance) or
+                    (start_point.distance(v_point) < tolerance and end_point.distance(u_point) < tolerance)):
+                    
+                    # Preserve the FULL detailed geometry
+                    data['geometry'] = edge_geom
+                    data['detailed_coords'] = coords  # Store coordinates for easy access
+                    geometry_preserved += 1
+                    edge_found = True
+                    break
+        
+        if not edge_found:
+            # Fallback: create simple line between nodes
+            u_coords = (graph.nodes[u]['x'], graph.nodes[u]['y'])
+            v_coords = (graph.nodes[v]['x'], graph.nodes[v]['y'])
+            data['geometry'] = LineString([u_coords, v_coords])
+            data['detailed_coords'] = [u_coords, v_coords]
+    
     print(f"Graph created with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges.")
+    print(f"Preserved detailed geometry for {geometry_preserved} edges.")
     return graph
 
 def fetch_elevations_for_coordinates(coordinates_2d, chunk_size=100):
@@ -115,14 +155,16 @@ def project_point_to_line(point, line):
     return line.interpolate(line.project(point))
 
 def split_line_at_point(line, point, tolerance=0.1):
-    """Splits a line at a point with robust handling."""
+    """Splits a line at a point with robust handling - PRESERVES detailed geometry."""
     from shapely.ops import split
     
     print(f"      Attempting to split line (length: {line.length:.1f}m)")
     print(f"      Point coords: ({point.x:.1f}, {point.y:.1f})")
     
-    # First check if point is too close to endpoints
+    # Get line coordinates
     coords = list(line.coords)
+    print(f"      Original line has {len(coords)} coordinates")
+    
     start_point = Point(coords[0])
     end_point = Point(coords[-1])
     
@@ -130,67 +172,78 @@ def split_line_at_point(line, point, tolerance=0.1):
     end_dist = point.distance(end_point)
     print(f"      Distance to start: {start_dist:.3f}m, to end: {end_dist:.3f}m")
     
+    # If point is too close to endpoints, don't split
     if start_dist < tolerance or end_dist < tolerance:
         print(f"      Point too close to line endpoints - skipping split")
         return [line]
     
-    # Check if point is actually on the line
-    line_dist = line.distance(point)
-    print(f"      Distance from point to line: {line_dist:.6f}m")
-    
     try:
-        # Try direct split first
-        print(f"      Trying direct split...")
-        split_result = split(line, point)
-        print(f"      Split result type: {split_result.geom_type}")
+        # Project point onto line to get exact position
+        projected_distance = line.project(point)
+        total_length = line.length
         
-        if split_result.geom_type == 'GeometryCollection':
-            lines = []
-            print(f"      GeometryCollection with {len(split_result.geoms)} geometries")
-            for i, geom in enumerate(split_result.geoms):
-                print(f"        Geom {i}: {geom.geom_type}, length: {geom.length:.3f}m")
-                if geom.geom_type == 'LineString' and geom.length > tolerance:
-                    lines.append(geom)
-                elif geom.geom_type == 'MultiLineString':
-                    lines.extend([g for g in geom.geoms if g.length > tolerance])
+        print(f"      Projected distance along line: {projected_distance:.3f}m / {total_length:.3f}m")
+        
+        # Find the segment of the line where the point should be inserted
+        current_distance = 0.0
+        split_index = -1
+        
+        for i in range(len(coords) - 1):
+            segment = LineString([coords[i], coords[i + 1]])
+            segment_length = segment.length
             
-            print(f"      Found {len(lines)} valid line parts")
-            if len(lines) >= 2:
-                return lines[:2]  # Return only first 2 parts
-            else:
-                print(f"      Not enough valid parts, trying buffered approach...")
-                
-        elif split_result.geom_type == 'MultiLineString':
-            lines = [g for g in split_result.geoms if g.length > tolerance]
-            print(f"      MultiLineString with {len(lines)} valid parts")
-            return lines if len(lines) >= 2 else [line]
+            if current_distance <= projected_distance <= current_distance + segment_length:
+                split_index = i
+                break
+            current_distance += segment_length
+        
+        if split_index == -1:
+            print(f"      ❌ Could not find split location - using simple split")
+            segment1 = LineString([coords[0], point.coords[0]])
+            segment2 = LineString([point.coords[0], coords[-1]])
         else:
-            print(f"      Unexpected split result type: {split_result.geom_type}")
-        
-        # If direct split didn't work, try with buffer
-        print(f"      Trying buffered split...")
-        buffered_point = point.buffer(0.01)  # 1cm buffer
-        split_result = split(line, buffered_point)
-        print(f"      Buffered split result type: {split_result.geom_type}")
-        
-        if split_result.geom_type == 'GeometryCollection':
-            lines = []
-            for geom in split_result.geoms:
-                if geom.geom_type == 'LineString' and geom.length > tolerance:
-                    lines.append(geom)
-                elif geom.geom_type == 'MultiLineString':
-                    lines.extend([g for g in geom.geoms if g.length > tolerance])
+            print(f"      Found split location at segment {split_index}")
             
-            print(f"      Buffered approach found {len(lines)} valid parts")
-            if len(lines) >= 2:
-                return lines[:2]
+            # Build first segment: from start to split point
+            first_coords = coords[:split_index + 1] + [point.coords[0]]
+            segment1 = LineString(first_coords)
             
-        print(f"      All split attempts failed")
-        return [line]
+            # Build second segment: from split point to end
+            second_coords = [point.coords[0]] + coords[split_index + 1:]
+            segment2 = LineString(second_coords)
+            
+            print(f"      Segment 1: {len(first_coords)} coords, length: {segment1.length:.1f}m")
+            print(f"      Segment 2: {len(second_coords)} coords, length: {segment2.length:.1f}m")
+        
+        # Validate segments
+        if segment1.length > tolerance and segment2.length > tolerance:
+            print(f"      ✅ Detailed geometry split successful!")
+            return [segment1, segment2]
+        else:
+            print(f"      ⚠️ Split created too-short segments")
+            return [line]
             
     except Exception as e:
-        print(f"      Exception during split: {e}")
-        return [line]
+        print(f"      ❌ Detailed split failed: {e}")
+        
+        # Final fallback: try shapely split with small buffer
+        try:
+            buffered_point = point.buffer(0.001)  # 1mm buffer
+            split_result = split(line, buffered_point)
+            
+            if split_result.geom_type == 'GeometryCollection':
+                lines = [geom for geom in split_result.geoms 
+                        if geom.geom_type == 'LineString' and geom.length > tolerance]
+                if len(lines) >= 2:
+                    print(f"      ✅ Fallback split successful: {len(lines)} parts")
+                    return lines[:2]
+            
+            print(f"      ❌ All split methods failed - using original segment")
+            return [line]
+            
+        except Exception as e2:
+            print(f"      ❌ Fallback split also failed: {e2}")
+            return [line]
 
 def calculate_shortest_path(graph, start_coords, end_coords):
     """
@@ -288,9 +341,53 @@ def calculate_shortest_path(graph, start_coords, end_coords):
     print("  Phase 2: Finding route on modified network...")
     print(f"  Modified GDF: {len(modified_gdf)} segments (was {len(gdf)})")
     
-    # Convert to NetworkX graph
+    # Convert to NetworkX graph and preserve detailed geometry
     modified_graph = momepy.gdf_to_nx(modified_gdf, approach='primal', length='length', multigraph=True)
+    
+    # CRITICAL: Re-preserve detailed geometry in the modified graph
+    print("  Re-preserving detailed geometry in modified graph...")
+    geometry_preserved = 0
+    
+    for u, v, key, data in modified_graph.edges(keys=True, data=True):
+        # Find the corresponding edge in the modified GDF
+        edge_found = False
+        
+        for idx, row in modified_gdf.iterrows():
+            edge_geom = row.geometry
+            if edge_geom.geom_type == 'LineString':
+                # Check if this edge connects nodes u and v
+                coords = list(edge_geom.coords)
+                if len(coords) < 2:
+                    continue
+                    
+                start_point = Point(coords[0])
+                end_point = Point(coords[-1])
+                
+                u_point = Point(modified_graph.nodes[u]['x'], modified_graph.nodes[u]['y'])
+                v_point = Point(modified_graph.nodes[v]['x'], modified_graph.nodes[v]['y'])
+                
+                # Check if edge endpoints match graph nodes (within tolerance)
+                tolerance = 1.0  # 1 meter tolerance
+                
+                if ((start_point.distance(u_point) < tolerance and end_point.distance(v_point) < tolerance) or
+                    (start_point.distance(v_point) < tolerance and end_point.distance(u_point) < tolerance)):
+                    
+                    # Preserve the FULL detailed geometry
+                    data['geometry'] = edge_geom
+                    data['detailed_coords'] = coords  # Store coordinates for easy access
+                    geometry_preserved += 1
+                    edge_found = True
+                    break
+        
+        if not edge_found:
+            # Fallback: create simple line between nodes
+            u_coords = (modified_graph.nodes[u]['x'], modified_graph.nodes[u]['y'])
+            v_coords = (modified_graph.nodes[v]['x'], modified_graph.nodes[v]['y'])
+            data['geometry'] = LineString([u_coords, v_coords])
+            data['detailed_coords'] = [u_coords, v_coords]
+    
     print(f"  Modified graph: {modified_graph.number_of_nodes()} nodes, {modified_graph.number_of_edges()} edges")
+    print(f"  Re-preserved detailed geometry for {geometry_preserved} edges")
     
     # Find exact snap point nodes
     start_node = None
@@ -328,30 +425,66 @@ def calculate_shortest_path(graph, start_coords, end_coords):
         print(f"  Path length: {path_length:.1f}m")
         print(f"  Number of nodes: {len(path_nodes)}")
         
-        # Reconstruct route geometry from path nodes
-        route_geometry = [start_coords]
+        # Reconstruct route geometry from path nodes using actual edge geometries
+        route_geometry = []
+        
+        print(f"  Reconstructing route geometry from {len(path_nodes)} nodes...")
+        
         for i in range(len(path_nodes) - 1):
             u, v = path_nodes[i], path_nodes[i+1]
+            print(f"    Processing edge {u} → {v}")
+            
             if modified_graph.has_edge(u, v):
                 # Get edge geometry
                 edge_data = modified_graph[u][v]
+                edge_geom = None
+                
                 if isinstance(edge_data, dict):
                     edge_geom = edge_data.get('geometry')
+                    print(f"      Single edge, has geometry: {edge_geom is not None}")
                 else:
                     # Multiple edges - get first one with geometry
-                    edge_geom = None
                     for key, data in edge_data.items():
                         if 'geometry' in data:
                             edge_geom = data['geometry']
+                            print(f"      Multi-edge key {key}, found geometry")
                             break
                 
                 if edge_geom and hasattr(edge_geom, 'coords'):
                     coords = list(edge_geom.coords)
-                    if Point(coords[0]).distance(Point(u)) > 1e-9:
+                    print(f"      Edge geometry has {len(coords)} coordinates")
+                    
+                    # Determine direction - check which end is closer to current node
+                    u_point = Point(modified_graph.nodes[u]['x'], modified_graph.nodes[u]['y'])
+                    start_dist = u_point.distance(Point(coords[0]))
+                    end_dist = u_point.distance(Point(coords[-1]))
+                    
+                    if end_dist < start_dist:
                         coords.reverse()
-                    route_geometry.extend(coords[1:])
+                        print(f"      Reversed edge direction")
+                    
+                    # Add coordinates to route
+                    if not route_geometry:
+                        # First edge - add all coordinates
+                        route_geometry.extend(coords)
+                        print(f"      Added {len(coords)} coords (first edge)")
+                    else:
+                        # Subsequent edges - skip first coordinate to avoid duplication
+                        route_geometry.extend(coords[1:])
+                        print(f"      Added {len(coords)-1} coords (skip first)")
+                else:
+                    print(f"      ❌ No geometry found for edge {u} → {v}")
+                    # Fallback to straight line between nodes
+                    u_coords = (modified_graph.nodes[u]['x'], modified_graph.nodes[u]['y'])
+                    v_coords = (modified_graph.nodes[v]['x'], modified_graph.nodes[v]['y'])
+                    if not route_geometry:
+                        route_geometry.append(u_coords)
+                    route_geometry.append(v_coords)
+                    print(f"      Added fallback straight line")
+            else:
+                print(f"      ❌ Edge {u} → {v} not found in graph!")
         
-        route_geometry.append(end_coords)
+        print(f"  Final route geometry: {len(route_geometry)} points")
         
         return route_geometry, path_length
         
