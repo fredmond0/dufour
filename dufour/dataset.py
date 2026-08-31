@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import Dataset
 
 from .satellite import s2_padded
-from .separate import ignore_mask
+from .separate import deterministic_mask, ignore_mask
 from .features import stack, CHANNELS
 from .copernicus import tile as cop_tile
 from .fetch import map_tile
@@ -23,8 +23,17 @@ HEALED_DIR = pathlib.Path("data/tiles/healed")
 
 
 class TileDataset(Dataset):
-    def __init__(self, manifest, augment=True, strip=True, use_s2=True):
+    def __init__(self, manifest, augment=True, strip=True, use_s2=True,
+                 require_healed=True):
         self.items = [tuple(t) for t in json.loads(pathlib.Path(manifest).read_text())]
+        if require_healed:
+            # Train only on fully-prepared tiles. Mixing healed and un-healed
+            # tiles means two different supervision regimes in one run, and the
+            # un-healed path costs ~7 s/tile of live OCR, which starves the GPU.
+            n0 = len(self.items)
+            self.items = [t for t in self.items
+                          if (HEALED_DIR / f"{t[0]}/{t[1]}/{t[2]}.png").exists()]
+            print(f"[TileDataset] {len(self.items)}/{n0} tiles healed and ready")
         self.augment = augment
         self.strip = strip
         self.use_s2 = use_s2
@@ -41,10 +50,16 @@ class TileDataset(Dataset):
         healed_p = HEALED_DIR / f"{z}/{x}/{y}.png"
         if healed_p.exists():
             rgb = np.asarray(Image.open(healed_p).convert("RGB"))
-            ign = np.zeros(rgb.shape[:2], bool) # Already clean and healed
+            # LaMa heals LETTERING only. Contours, water, forest tint and route
+            # ink survive healing untouched -- and the deterministic renderer
+            # draws all of those itself. Supervising on them teaches the model
+            # to draw a second, slightly wrong copy, so the finished sheet gets
+            # doubled contours. Measured: 17.7% of a healed tile on average,
+            # up to 90%. It must still be masked out of the loss.
+            ign = deterministic_mask(rgb) if self.strip else np.zeros(rgb.shape[:2], bool)
         else:
             rgb = map_tile(z, x, y)
-            ign = ignore_mask(rgb) if self.strip else np.zeros(rgb.shape[:2], bool)
+            ign = ignore_mask(rgb, z, x, y) if self.strip else np.zeros(rgb.shape[:2], bool)
 
         # Augment the DEM and the target *before* deriving features. Rotating a
         # finished feature stack would be wrong: hillshades rotate correctly

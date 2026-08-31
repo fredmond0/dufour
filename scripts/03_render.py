@@ -16,7 +16,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from dufour.frame import Frame
 from dufour.osm import fetch
 from dufour.render import render_vectors, draw_labels, glacier_mask
-from dufour.terrain import analytic_relief, contours, dem_mosaic
+from dufour.copernicus import sample as cop_sample
+from dufour.terrain import analytic_relief, contours, dem_mosaic, swiss_relief
 
 
 def main():
@@ -35,7 +36,12 @@ def main():
     f = Frame.around(a.lat, a.lon, a.zoom, a.km)
     print(f, flush=True)
 
-    t = time.time(); dem, off = dem_mosaic(f); print(f"  dem      {time.time()-t:5.1f}s", flush=True)
+    # Copernicus GLO-30, the SAME source the model was conditioned on. The
+    # terrain-tile mosaic used during harvesting is a patchwork of resolutions;
+    # feeding it here would hand the network out-of-distribution input and undo
+    # the whole point of training on a uniform global DEM.
+    t = time.time(); dem, off = cop_sample(f, pad_px=256)
+    print(f"  dem      {time.time()-t:5.1f}s  (Copernicus GLO-30)", flush=True)
     t = time.time(); osm = fetch(f.bbox());     print(f"  osm      {time.time()-t:5.1f}s  "
                                                       f"{len(osm['elements'])} elements", flush=True)
     ice = glacier_mask(f, osm)
@@ -46,7 +52,7 @@ def main():
     if a.analytic or not pathlib.Path(a.ckpt).exists():
         if not a.analytic:
             print("  (no checkpoint yet -> analytic relief)", flush=True)
-        base = analytic_relief(f, dem, off)
+        base = swiss_relief(f, dem, off)
     else:
         from dufour.infer import learned_relief
         base = learned_relief(f, dem, off, a.ckpt)

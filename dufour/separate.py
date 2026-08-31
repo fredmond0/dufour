@@ -69,7 +69,7 @@ def deterministic_mask(rgb, thresh=38, min_chroma=25, grow=1):
     return m
 
 
-def ignore_mask(rgb):
+def ignore_mask(rgb, z=None, x=None, y=None):
     """Pixels the generator must NOT be supervised on.
 
     Everything the deterministic renderer owns (contours, water, forest tint,
@@ -79,7 +79,18 @@ def ignore_mask(rgb):
     loss instead removes the pixels from supervision entirely, with no
     synthetic texture for the model to imitate.
     """
-    return deterministic_mask(rgb) | text_mask(rgb)
+    if z is not None:
+        # Use the precomputed OCR mask. Running CRAFT inside the DataLoader
+        # costs ~7.4 s/tile versus 21 ms for a cache hit -- with 6 workers that
+        # is 0.8 img/s against a GPU that wants 12, i.e. a 15x slowdown, and it
+        # loads a copy of the detector into every worker process.
+        from .ocr import cached_mask
+        tm = cached_mask(z, x, y, rgb)
+        if tm is None:
+            tm = text_mask(rgb)
+    else:
+        tm = text_mask(rgb)
+    return deterministic_mask(rgb) | tm
 
 
 def terrain_layer(rgb, drop_text=True):

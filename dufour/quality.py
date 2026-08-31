@@ -10,11 +10,19 @@ the swisstopo look is most striking and where labels are naturally sparsest.
 """
 import numpy as np
 
-from .delabel import text_mask
+from .delabel import text_mask  # noqa: F401  (OCR; not used for harvesting)
 
 
 def text_score(rgb):
-    return float(text_mask(rgb).mean())
+    """Cheap lettering proxy for HARVEST-TIME filtering only.
+
+    Deliberately not the CRAFT detector: harvesting probes ~8000 candidate
+    tiles, and at ~7 s/tile that turns a minutes-long job into most of a day.
+    Precision does not matter here -- we only need to skip obviously
+    label-heavy tiles, and the real mask is computed later by dufour.ocr."""
+    from scipy.ndimage import binary_erosion
+    dark = rgb.max(axis=2) < 90
+    return float(binary_erosion(dark, np.ones((3, 3))).mean())
 
 
 def colour_flags(rgb):

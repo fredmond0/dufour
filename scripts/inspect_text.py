@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from dufour.delabel import text_mask, word_mask
+from dufour.ocr import cached_mask, detect
 from dufour.fetch import map_tile
 from dufour.frame import Frame
 from dufour.separate import deterministic_mask
@@ -31,8 +31,13 @@ from dufour.tiles import tile_bounds
 OUT = pathlib.Path("out/inspect")
 
 
-def load(split="train"):
-    return [tuple(t) for t in json.loads(pathlib.Path(f"data/{split}.json").read_text())]
+def load(split="train", cached_only=True):
+    items = [tuple(t) for t in json.loads(pathlib.Path(f"data/{split}.json").read_text())]
+    if cached_only:
+        # Inspect exactly what training will consume: the cached OCR masks.
+        items = [t for t in items
+                 if pathlib.Path(f"data/textmask/{t[0]}/{t[1]}/{t[2]}.png").exists()]
+    return items
 
 
 def overlay(rgb, mask, colour=(230, 30, 30), alpha=0.55):
@@ -60,7 +65,9 @@ def cmd_visual(a):
         m = map_tile(z, x, y)
         if m is None:
             continue
-        tm = text_mask(m)
+        tm = cached_mask(z, x, y, m)
+        if tm is None:
+            continue
         scored.append((float(tm.mean()), (z, x, y), m, tm))
     scored.sort(key=lambda r: -r[0] if a.sort == "worst" else r[0])
     if a.sort == "random":
@@ -108,7 +115,9 @@ def cmd_audit(a):
         named = [(t.get("name"), la, lo) for t, la, lo in nodes(osm) if t.get("name")]
         if not named:
             continue
-        tm = text_mask(m)
+        tm = cached_mask(z, x, y, m)
+        if tm is None:
+            continue
         f = Frame(z, x, y, 1, 1)
         for name, la, lo in named:
             px, py = f.lonlat_to_px(lo, la)

@@ -85,3 +85,20 @@ def channels(rgb):
     tex = np.clip(tex / 0.22, 0, 1)
     return np.stack([np.clip(green, 0, 1), np.clip(bright, 0, 1),
                      gaussian_filter(tex, 0.6)]).astype(np.float32)
+
+
+def s2_mosaic(frame, pad_px=96):
+    """Sentinel-2 RGB covering a Frame plus `pad_px` of context."""
+    from .tiles import TILE_PX
+    pt = int(np.ceil(pad_px / TILE_PX))
+    nx, ny = frame.nx + 2 * pt, frame.ny + 2 * pt
+    big = np.full((ny * TILE_PX, nx * TILE_PX, 3), 128, np.uint8)
+    for j in range(ny):
+        for i in range(nx):
+            t = s2_tile(frame.z, frame.x0 - pt + i, frame.y0 - pt + j)
+            if t is not None:
+                big[j * TILE_PX:(j + 1) * TILE_PX, i * TILE_PX:(i + 1) * TILE_PX] = t
+    o = pt * TILE_PX - pad_px
+    n_h = frame.height + 2 * pad_px
+    n_w = frame.width + 2 * pad_px
+    return big[o:o + n_h, o:o + n_w]

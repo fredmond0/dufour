@@ -18,6 +18,8 @@ from scipy.ndimage import gaussian_filter, uniform_filter
 from .tiles import meters_per_pixel
 
 CUTOFF_M = 30.0          # GLO-30 native posting
+LOCAL_RELIEF_M = 260.0   # window for the local-relief datum
+LOCAL_RELIEF_SCALE_M = 260.0
 AZIMUTHS = (315, 45, 135, 225)
 ALTITUDE = 45.0
 ELEV_MAX = 9000.0
@@ -78,8 +80,17 @@ def stack(dem, lat, z, crop=None, s2=None):
                         mpp, 315, altitude=40))
     ch.append(slope_r / (np.pi / 2))
     ch.append(np.clip(d / ELEV_MAX, 0, 1))
-    lo, hi = np.percentile(d, 2), np.percentile(d, 98)
-    ch.append(np.clip((d - lo) / max(hi - lo, 1e-3), 0, 1))
+
+    # Local relief position, measured against a FIXED physical scale rather
+    # than percentiles of whatever array happened to be passed in.
+    # Percentiles made this channel depend on the crop: a 448 px training tile
+    # (~1.5 km) and a whole inference mosaic (tens of km) gave the same slope
+    # completely different values, so the model met inputs at inference that it
+    # never saw in training -- and adjacent inference tiles disagreed, which
+    # shows up as tonal seams. A fixed-sigma local base is translation
+    # invariant, so train and inference agree and neighbouring tiles match.
+    base_local = gaussian_filter(d, max((LOCAL_RELIEF_M / mpp) / 2.355, 0.5))
+    ch.append(np.clip((d - base_local) / LOCAL_RELIEF_SCALE_M, -1, 1) * 0.5 + 0.5)
     ch.append(np.clip(curv * 200.0, -1, 1) * 0.5 + 0.5)
     ch.append(np.sin(aspect) * 0.5 + 0.5)
     ch.append(np.cos(aspect) * 0.5 + 0.5)

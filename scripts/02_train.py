@@ -44,8 +44,20 @@ def sobel(t):
     return torch.cat([F.conv2d(g, kx, padding=1), F.conv2d(g, ky, padding=1)], 1)
 
 
+MIN_SUPERVISED = 0.02   # fraction of pixels
+
+
 def masked_l1(a, b, keep):
-    return ((a - b).abs() * keep).sum() / (keep.sum() * a.shape[1] + 1e-6)
+    """L1 over supervised pixels only.
+
+    The denominator is floored: some tiles (dense pasture, where the forest
+    tint is deterministic) come back over 90% masked, and one that masks out
+    entirely would divide by ~1e-6 and produce an enormous gradient or a NaN.
+    Flooring makes such a tile contribute proportionally little instead of
+    detonating the run."""
+    denom = keep.sum() * a.shape[1]
+    floor = MIN_SUPERVISED * keep.numel() * a.shape[1]
+    return ((a - b).abs() * keep).sum() / torch.clamp(denom, min=floor)
 
 
 def device():
