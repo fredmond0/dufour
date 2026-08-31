@@ -76,7 +76,8 @@ random split measures memorisation. Bernina and Uri are held out whole.
 ```bash
 python3 scripts/01_build_dataset.py     # harvest + filter Swiss alpine tiles
 python3 scripts/00_prefetch.py          # warm DEM / imagery caches (repeatable)
-python3 scripts/04_textmasks.py         # precompute neural text masks (parallel)
+python3 scripts/04_textmasks.py         # precompute neural text masks (parallel CRAFT OCR)
+python3 scripts/05_heal_dataset.py      # LaMa AI inpainting -> clean RGB targets (data/tiles/healed/)
 python3 scripts/bench.py                # throughput + epoch-time estimate
 python3 scripts/02_train.py --epochs 40 # resumable; writes out/ckpt/state.pt
 python3 scripts/03_render.py --lat 46.5 --lon 11.3 --km 8 --out out/dolomites.png
@@ -99,7 +100,7 @@ dufour/
   delabel.py     glyph- and word-level lettering detection
   separate.py    splits the raster into terrain vs deterministic ink
   quality.py     training-tile selection
-  dataset.py     torch Dataset; derives features in workers
+  dataset.py     torch Dataset; loads pre-healed clean tiles directly from disk
   model.py       U-Net generator + PatchGAN discriminator
   legend.py      LK25 symbology as data, widths in paper mm at 1:25'000
   render.py      deterministic vector rendering + labels
@@ -108,9 +109,10 @@ dufour/
 scripts/
   00_prefetch.py      warm DEM / satellite caches
   01_build_dataset.py harvest & filter tiles with regional holdouts
+  04_textmasks.py     precompute text masks for all dataset tiles (CRAFT OCR)
+  05_heal_dataset.py  batch LaMa AI inpainting -> data/tiles/healed/
   02_train.py         Pix2Pix U-Net + PatchGAN training harness
   03_render.py        composite neural terrain with OSM vector overlay
-  04_textmasks.py     precompute text masks for all dataset tiles
   bench.py            training throughput benchmark
   compare.py          diagnostic rendering comparison
   palette.py          k-means recovery of swisstopo ink colours

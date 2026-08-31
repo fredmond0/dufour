@@ -7,6 +7,7 @@ storage win and keeps an M-series GPU fed.
 """
 import json, pathlib
 import numpy as np
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
 
@@ -18,6 +19,7 @@ from .fetch import map_tile
 from .tiles import tile2deg
 
 PAD = 96  # px of real neighbour context kept around the tile while filtering
+HEALED_DIR = pathlib.Path("data/tiles/healed")
 
 
 class TileDataset(Dataset):
@@ -34,10 +36,15 @@ class TileDataset(Dataset):
         z, x, y = self.items[i]
         sub = cop_tile(z, x, y, pad_px=PAD)                  # 448x448
         sat = s2_padded(z, x, y, pad_px=PAD) if self.use_s2 else None
-        rgb = map_tile(z, x, y)
-        # Target stays the untouched raster; a mask tells the loss which pixels
-        # belong to the deterministic renderer and must be ignored.
-        ign = ignore_mask(rgb) if self.strip else np.zeros(rgb.shape[:2], bool)
+
+        # Load pre-healed target image if available, else raw map tile
+        healed_p = HEALED_DIR / f"{z}/{x}/{y}.png"
+        if healed_p.exists():
+            rgb = np.asarray(Image.open(healed_p).convert("RGB"))
+            ign = np.zeros(rgb.shape[:2], bool) # Already clean and healed
+        else:
+            rgb = map_tile(z, x, y)
+            ign = ignore_mask(rgb) if self.strip else np.zeros(rgb.shape[:2], bool)
 
         # Augment the DEM and the target *before* deriving features. Rotating a
         # finished feature stack would be wrong: hillshades rotate correctly
