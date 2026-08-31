@@ -1,0 +1,12 @@
+  zermatt        518/  900 accepted
+  mischabel      365/  648 accepted
+  jungfrau       597/  900 accepted
+  grimsel        513/  900 accepted
+  bernina        219/  825 accepted   [HELD OUT]
+  silvretta      173/  621 accepted
+  uri            240/  900 accepted   [HELD OUT]
+  gotthard       196/  750 accepted
+  dentblanche    204/  550 accepted
+  adula          218/  792 accepted
+
+train 2784  val 459  (val = bernina+uri)
