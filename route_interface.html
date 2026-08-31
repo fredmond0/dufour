@@ -1,0 +1,1684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Swiss TLM3D Route Planner (Debug Interface)</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; display: flex; height: 100vh; }
+        .sidebar { width: 350px; background: white; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; }
+        .map-container { flex: 1; position: relative; display: flex; flex-direction: column; }
+        #map { flex: 1; width: 100%; }
+        .control-panel { padding: 15px; background: #f8f9fa; border-radius: 5px; margin-bottom: 15px; }
+        h3, h4 { margin-top: 0; }
+        .btn { display: block; width: 100%; background: #007bff; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        .btn:disabled { background: #6c757d; cursor: not-allowed; }
+        .btn-secondary { background: #6c757d; }
+        .coordinates { font-family: monospace; font-size: 12px; color: #666; padding: 5px 0; }
+        .status { padding: 10px; margin-top: 15px; border-radius: 4px; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .route-info { background: #e9ecef; padding: 15px; border-radius: 4px; margin-top: 15px; display: none; }
+        .loading { display: none; text-align: center; padding: 20px; }
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #007bff; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        .waypoint-item { display: flex; flex-direction: column; margin: 8px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6; }
+        .waypoint-item.start { border-left: 4px solid #28a745; }
+        .waypoint-item.end { border-left: 4px solid #dc3545; }
+        .waypoint-item.intermediate { border-left: 4px solid #6c757d; }
+        
+        .waypoint-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
+        .waypoint-label { font-weight: bold; font-size: 14px; }
+        .waypoint-label.start { color: #28a745; }
+        .waypoint-label.end { color: #dc3545; }
+        .waypoint-label.intermediate { color: #495057; }
+        
+        .waypoint-coords { font-family: monospace; font-size: 11px; color: #666; margin-bottom: 5px; }
+        .waypoint-segment-info { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+        .waypoint-network-info { display: flex; align-items: center; }
+        .waypoint-stats { color: #495057; font-weight: 500; }
+        
+        .waypoint-network-select { margin: 0 5px; font-size: 11px; }
+        .waypoint-remove { background: #dc3545; color: white; border: none; border-radius: 3px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
+        .waypoint-remove:hover { background: #c82333; }
+        
+        .network-color-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+            border: 1px solid #ccc;
+        }
+
+        /* Routing mode toggle styles */
+        .routing-mode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .toggle-label {
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 120px;
+            height: 32px;
+            margin: 0;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #2196F3;
+            border-radius: 16px;
+            transition: .3s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 24px;
+            width: 56px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            border-radius: 12px;
+            transition: .3s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #4CAF50;
+        }
+        
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(56px);
+        }
+        
+        .toggle-option {
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+            z-index: 1;
+            width: 50px;
+            text-align: center;
+        }
+        
+        .toggle-option-left {
+            opacity: 1;
+        }
+        
+        .toggle-option-right {
+            opacity: 0.6;
+        }
+        
+        .toggle-switch input:checked + .toggle-slider .toggle-option-left {
+            opacity: 0.6;
+        }
+        
+        .toggle-switch input:checked + .toggle-slider .toggle-option-right {
+            opacity: 1;
+        }
+
+        /* Header with toggle layout */
+        .header-with-toggle {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .header-with-toggle h3 {
+            margin: 0;
+        }
+        
+        .header-with-toggle .toggle-switch {
+            width: 100px;
+            height: 28px;
+        }
+        
+        .header-with-toggle .toggle-slider:before {
+            height: 20px;
+            width: 46px;
+            left: 4px;
+            bottom: 4px;
+        }
+        
+        .header-with-toggle .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(46px);
+        }
+        
+        .header-with-toggle .toggle-option {
+            font-size: 10px;
+            width: 42px;
+        }
+
+        /* Bottom elevation panel styles */
+        .elevation-bottom-panel {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 2px solid #007bff;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            transition: height 0.3s ease;
+            height: 250px;
+            z-index: 1000;
+        }
+        
+        .elevation-bottom-panel.collapsed {
+            height: 40px;
+        }
+        
+        .elevation-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            cursor: pointer;
+        }
+        
+        .elevation-panel-header h4 {
+            margin: 0;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .elevation-toggle-btn {
+            background: none;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 0;
+            color: #666;
+            transition: transform 0.3s ease;
+        }
+        
+        .elevation-toggle-btn.collapsed {
+            transform: rotate(180deg);
+        }
+        
+        .elevation-bottom-panel .elevation-chart-container {
+            padding: 15px;
+            height: calc(100% - 40px);
+            overflow: hidden;
+        }
+        
+        .elevation-bottom-panel.collapsed .elevation-chart-container {
+            display: none;
+        }
+        
+        #elevation-bottom-chart {
+            width: 100% !important;
+            height: 100% !important;
+            max-height: 180px;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="header-with-toggle">
+            <h3>📍 Route Planner</h3>
+            <div class="routing-mode-toggle">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="routing-mode-toggle" checked>
+                    <span class="toggle-slider">
+                        <span class="toggle-option toggle-option-left">📍 Point</span>
+                        <span class="toggle-option toggle-option-right">🗺️ Multi</span>
+                    </span>
+                </label>
+            </div>
+        </div>
+        <p>Use the layer control in the top right of the map to change base maps and toggle overlays.</p>
+
+        <div class="control-panel" id="points-panel">
+            <h4>Points</h4>
+            <div>Start: <span class="coordinates" id="start-coords">Not set</span></div>
+            <div>End: <span class="coordinates" id="end-coords">Not set</span></div>
+        </div>
+
+        <div class="control-panel">
+            <h4>Network</h4>
+            <label><input type="radio" name="network-type" value="ski_touring" checked> <span class="network-color-indicator" style="background-color: #A23B72;"></span> 🎿 Ski Touring</label><br>
+            <label><input type="radio" name="network-type" value="sac_alpine"> <span class="network-color-indicator" style="background-color: #F18F01;"></span> 🏔️ SAC Alpine</label><br>
+            <label><input type="radio" name="network-type" value="tlm3d"> <span class="network-color-indicator" style="background-color: #2E86AB;"></span> 🚗 TLM3D</label><br>
+            <label><input type="radio" name="network-type" value="manual"> <span class="network-color-indicator" style="background-color: #C73E1D;"></span> 📏 Manual (Straight Line)</label>
+            <small style="color: #666; display: block; margin-top: 5px;">Choose routing method for each segment.</small>
+        </div>
+
+        <div class="control-panel">
+            <label for="buffer-slider">Buffer: <span id="buffer-value">5.0</span> km</label>
+            <input type="range" id="buffer-slider" min="0.5" max="20" step="0.1" value="5">
+        </div>
+        
+        <button class="btn" id="calculate-btn" onclick="calculateRoute()" disabled>Calculate Route</button>
+        <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <div>Calculating...</div>
+        </div>
+        
+        <div id="status-container"></div>
+        
+        <div id="waypoints-container" class="control-panel" style="display: none;">
+            <h4>🗺️ Waypoints</h4>
+            <div id="waypoints-list">
+                <!-- Waypoints will be dynamically added here -->
+            </div>
+            <button class="btn btn-secondary" onclick="clearAllWaypoints()" style="margin-top: 10px;">Clear All Waypoints</button>
+        </div>
+
+        <div id="route-info" class="route-info">
+            <h4>📊 Route Info</h4>
+            <div><strong>Distance:</strong> <span id="route-length">-</span> km</div>
+            <div><strong>Segments Loaded:</strong> <span id="segments-loaded">-</span></div>
+            <div><strong>Buffer Used:</strong> <span id="buffer-size">-</span> km</div>
+        </div>
+        
+        <div id="elevation-chart-container" class="route-info" style="display: none;">
+            <h4>🏔️ Elevation Profile</h4>
+            <div style="height: 200px; width: 100%; overflow: hidden;">
+                <canvas id="elevation-chart" style="max-width: 100%; max-height: 100%;"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="map-container">
+        <div id="map"></div>
+        
+        <!-- Bottom Elevation Profile Panel -->
+        <div id="elevation-bottom-panel" class="elevation-bottom-panel" style="display: none;">
+            <div class="elevation-panel-header">
+                <h4>📈 Elevation Profile</h4>
+                <button id="elevation-toggle-btn" class="elevation-toggle-btn">▼</button>
+            </div>
+            <div id="elevation-bottom-chart-container" class="elevation-chart-container">
+                <canvas id="elevation-bottom-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-tilelayer-swiss@2.3.0/dist/Leaflet.TileLayer.Swiss.umd.js"></script>
+    
+    <script>
+        // --- Global State ---
+        let map;
+        let startMarker = null;
+        let endMarker = null;
+        let routeLayer = null;
+        let startPoint = null;
+        let endPoint = null;
+        let elevationChart = null;
+        let sacRoutesLayer = null;
+        let overlayMaps = null;
+        
+        // Network type colors for markers and routes
+        const NETWORK_COLORS = {
+            'tlm3d': '#2E86AB',           // Blue - TLM3D trails
+            'ski_touring': '#A23B72',     // Purple - Ski touring routes  
+            'sac_alpine': '#F18F01',      // Orange - SAC Alpine routes
+            'manual': '#C73E1D'           // Red - Manual/direct routes
+        };
+        
+        // Custom marker creation functions
+        function createStartMarker(latlng) {
+            return L.marker(latlng, {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'custom-marker start-marker',
+                    html: '<div style="background-color: #28a745; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 16px;">▶</div>',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                })
+            });
+        }
+        
+        function createEndMarker(latlng) {
+            return L.marker(latlng, {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'custom-marker end-marker',
+                    html: '<div style="background-color: #dc3545; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 16px;">🏁</div>',
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                })
+            });
+        }
+        
+        function createIntermediateMarker(latlng, networkType, waypointNumber) {
+            const color = NETWORK_COLORS[networkType] || '#6c757d';
+            return L.marker(latlng, {
+                draggable: true,
+                icon: L.divIcon({
+                    className: 'custom-marker intermediate-marker',
+                    html: `<div style="background-color: ${color}; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 12px; font-weight: bold;">${waypointNumber}</div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                })
+            });
+        }
+        
+        // --- Multi-Point Routing State ---
+        let routingMode = 'multi-point'; // Default to multi-point
+        let waypoints = [];
+        let routeLayers = [];
+        let segmentData = []; // Store segment info: distance, elevation gain/loss, network type
+        let completeRouteGeometry = []; // Complete route as continuous LineString coordinates (LV95)
+        let completeRouteLatLng = []; // Complete route as continuous LineString coordinates (WGS84)
+        let segmentGeometries = []; // Store individual segment geometries for rebuilding
+        
+        // Helper function to calculate elevation gain/loss from elevation profile
+        function calculateElevationStats(elevationProfile) {
+            if (!elevationProfile || elevationProfile.length < 2) {
+                return { elevationGain: 0, elevationLoss: 0 };
+            }
+            
+            let totalGain = 0;
+            let totalLoss = 0;
+            
+            for (let i = 1; i < elevationProfile.length; i++) {
+                const prevElevation = elevationProfile[i - 1][1];
+                const currElevation = elevationProfile[i][1];
+                const diff = currElevation - prevElevation;
+                
+                if (diff > 0) {
+                    totalGain += diff;
+                } else if (diff < 0) {
+                    totalLoss += Math.abs(diff);
+                }
+            }
+            
+            return {
+                elevationGain: Math.round(totalGain),
+                elevationLoss: Math.round(totalLoss)
+            };
+        }
+
+        // Rebuild the complete route geometry from all segments (used by updateSpecificSegments)
+        async function rebuildCompleteRouteGeometry() {
+            console.log('🔄 Rebuilding complete route geometry from stored segments...');
+            
+            // Clear existing geometry
+            completeRouteGeometry = [];
+            completeRouteLatLng = [];
+            
+            // Rebuild from stored segment geometries
+            for (let i = 0; i < waypoints.length - 1; i++) {
+                const segmentGeometry = segmentGeometries[i];
+                
+                if (!segmentGeometry) {
+                    console.log(`⚠️ No stored geometry for segment ${i} - skipping`);
+                    continue;
+                }
+                
+                const segmentLV95 = segmentGeometry.lv95;
+                const segmentLatLng = segmentGeometry.latLng;
+                
+                // Add start point (only if this is the first segment)
+                if (i === 0 && segmentLV95.length > 0) {
+                    completeRouteGeometry.push(segmentLV95[0]);
+                    completeRouteLatLng.push(segmentLatLng[0]);
+                }
+                
+                // Add all coordinates except the first (to avoid duplication)
+                for (let j = 1; j < segmentLV95.length; j++) {
+                    completeRouteGeometry.push(segmentLV95[j]);
+                    completeRouteLatLng.push(segmentLatLng[j]);
+                }
+            }
+            
+            console.log(`🔄 Rebuilt route geometry with ${completeRouteGeometry.length} coordinates from ${segmentGeometries.filter(s => s).length} segments`);
+        }
+
+        // Get elevation profile for the complete continuous multi-point route
+        async function getCompleteRouteElevationProfile() {
+            if (completeRouteGeometry.length < 2) {
+                console.log('⚠️ Not enough route coordinates for elevation profile');
+                return;
+            }
+
+            try {
+                // Create a LineString geometry for the Swiss profile API
+                const lineString = {
+                    type: "LineString",
+                    coordinates: completeRouteGeometry
+                };
+
+                console.log('🏔️ Calling Swiss elevation API for complete route via POST...');
+                
+                // Use POST request to handle large geometries
+                const response = await fetch('https://api3.geo.admin.ch/rest/services/profile.json', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        'geom': JSON.stringify(lineString),
+                        'sr': '2056',
+                        'nb_points': '200'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.length > 0) {
+                        // Convert to elevation profile format [distance, elevation]
+                        const elevationProfile = data.map(point => [point.dist, point.alts.COMB]);
+                        
+                        console.log(`✅ Got elevation profile with ${elevationProfile.length} points for ${(elevationProfile[elevationProfile.length-1][0]/1000).toFixed(1)}km route`);
+                        
+                        // Display the elevation profile
+                        displayElevationProfile(elevationProfile);
+                        
+                        // Store globally for potential future use
+                        window.completeElevationProfile = elevationProfile;
+                    } else {
+                        console.log('⚠️ Empty elevation profile response');
+                    }
+                } else {
+                    console.log('⚠️ Elevation profile request failed:', response.status);
+                }
+            } catch (error) {
+                console.log('⚠️ Error getting elevation profile:', error.message);
+            }
+        }
+
+        // --- Map Initialization ---
+        function initMap() {
+            // --- 1. Define Base Map Layers ---
+            const swissWinter = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-farbe-winter' });
+            const swissColor = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-farbe' });
+            const swissGrey = L.tileLayer.swiss({ layer: 'ch.swisstopo.pixelkarte-grau' });
+
+            // --- 2. Define Overlay Layers ---
+            const slopeAngles = L.tileLayer.swiss({
+                layer: 'ch.swisstopo.hangneigung-ueber_30',
+                format: 'png',
+                opacity: 0.5
+            });
+
+            const hikingTrails = L.tileLayer.swiss({
+                layer: 'ch.swisstopo.swisstlm3d-wanderwege',
+                format: 'png',
+                opacity: 0.8
+            });
+            
+            // --- NEW: Add the official ski touring routes overlay ---
+            const skiTouringRoutes = L.tileLayer.swiss({
+                layer: 'ch.swisstopo-karto.skitouren', // Layer name for official ski routes
+                format: 'png',
+                opacity: 0.8
+            });
+            
+            // --- SAC Alpine Routes Layer (dynamic GeoJSON) ---
+
+            // --- 3. Create the map with a default base layer ---
+            map = L.map('map', {
+                crs: L.CRS.EPSG2056,
+                layers: [swissWinter]
+            });
+            map.fitSwitzerland();
+            map.on('click', onMapClick);
+
+            // --- 4. Create Layer Control Objects ---
+            const baseMaps = {
+                "Winter Map": swissWinter,
+                "Color Map": swissColor,
+                "Grey Map": swissGrey
+            };
+
+            overlayMaps = {
+                "Slope > 30°": slopeAngles,
+                "Marked Trails": hikingTrails,
+                "Official Ski Routes": skiTouringRoutes,
+                "SAC Alpine Routes": L.layerGroup() // Placeholder for SAC routes
+            };
+
+            // --- 5. Add the Layer Control to the map ---
+            L.control.layers(baseMaps, overlayMaps).addTo(map);
+            
+            // --- SAC Routes Layer Management ---
+            map.on('overlayadd', function(e) {
+                if (e.name === 'SAC Alpine Routes') {
+                    loadSacRoutes();
+                }
+            });
+            
+            map.on('overlayremove', function(e) {
+                if (e.name === 'SAC Alpine Routes') {
+                    if (sacRoutesLayer) {
+                        overlayMaps["SAC Alpine Routes"].clearLayers();
+                        sacRoutesLayer = null;
+                    }
+                }
+            });
+            
+            // --- 6. Add event listener for buffer slider ---
+            document.getElementById('buffer-slider').addEventListener('input', (e) => {
+                document.getElementById('buffer-value').textContent = parseFloat(e.target.value).toFixed(1);
+            });
+        }
+
+        // --- User Interaction ---
+        function onMapClick(e) {
+            if (routingMode === 'multi-point') {
+                // In multi-point mode, add waypoints
+                addWaypoint(e.latlng);
+            } else {
+                // In point-to-point mode, set start/end points
+                if (!startPoint) {
+                    setPoint('start', e.latlng);
+                } else if (!endPoint) {
+                    setPoint('end', e.latlng);
+                }
+            }
+        }
+        
+        function setPoint(type, latlng) {
+            let marker;
+            if (type === 'start') {
+                marker = createStartMarker(latlng).addTo(map);
+                startPoint = latlng;
+                startMarker = marker;
+                marker.on('dragend', (e) => { startPoint = e.target.getLatLng(); updateCoordsDisplay(); });
+            } else {
+                marker = createEndMarker(latlng).addTo(map);
+                endPoint = latlng;
+                endMarker = marker;
+                marker.on('dragend', (e) => { endPoint = e.target.getLatLng(); updateCoordsDisplay(); });
+            }
+            updateCoordsDisplay();
+            updateCalculateButton();
+        }
+        
+        // --- Backend Communication ---
+        async function calculateRoute() {
+            if (!startPoint || !endPoint) return;
+            showLoading(true);
+            clearRoute();
+            try {
+                const networkType = document.querySelector('input[name="network-type"]:checked').value;
+                const bufferDistance = parseFloat(document.getElementById('buffer-slider').value) * 1000;
+                const response = await fetch('/calculate_route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_coords: [startPoint.lat, startPoint.lng],
+                        end_coords: [endPoint.lat, endPoint.lng],
+                        buffer_distance: bufferDistance,
+                        network_type: networkType
+                    })
+                });
+                const result = await response.json();
+                if (result.success && result.route) {
+                    displayRoute(result);
+                    showStatus('Route calculated successfully!', 'success');
+                } else {
+                    throw new Error(result.error || 'No route found.');
+                }
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // --- UI Updates & Display ---
+        function displayRoute(result) {
+            const routeLatLngs = result.route.map(coord => {
+                const point = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                return [point.lat, point.lng];
+            });
+            routeLayer = L.layerGroup().addTo(map);
+            L.polyline(routeLatLngs, { color: 'white', weight: 8, opacity: 0.8 }).addTo(routeLayer);
+            L.polyline(routeLatLngs, { color: '#ff6600', weight: 5 }).addTo(routeLayer);
+            map.fitBounds(L.polyline(routeLatLngs).getBounds(), { padding: [50, 50] });
+            document.getElementById('route-info').style.display = 'block';
+            document.getElementById('route-length').textContent = (result.path_length / 1000).toFixed(2);
+            document.getElementById('segments-loaded').textContent = result.segments_loaded;
+            document.getElementById('buffer-size').textContent = (result.buffer_distance / 1000).toFixed(1);
+            
+            // Display elevation profile if available
+            if (result.elevation_profile && result.elevation_profile.length > 0) {
+                displayElevationProfile(result.elevation_profile);
+            }
+        }
+
+        function clearAll() {
+            clearRoute();
+            if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+            if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
+            startPoint = null;
+            endPoint = null;
+            updateCoordsDisplay();
+            updateCalculateButton();
+            document.getElementById('route-info').style.display = 'none';
+            document.getElementById('elevation-chart-container').style.display = 'none';
+            document.getElementById('status-container').innerHTML = '';
+            
+            // Destroy elevation chart if it exists
+            if (elevationChart) {
+                elevationChart.destroy();
+                elevationChart = null;
+            }
+            
+            // Always clear multi-point routes regardless of current mode
+            clearAllWaypoints();
+        }
+
+        function clearRoute() {
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
+            }
+        }
+
+        function updateCoordsDisplay() {
+            document.getElementById('start-coords').textContent = startPoint ? `${startPoint.lat.toFixed(5)}, ${startPoint.lng.toFixed(5)}` : 'Not set';
+            document.getElementById('end-coords').textContent = endPoint ? `${endPoint.lat.toFixed(5)}, ${endPoint.lng.toFixed(5)}` : 'Not set';
+        }
+
+        function updateCalculateButton() {
+            document.getElementById('calculate-btn').disabled = !(startPoint && endPoint);
+        }
+        
+        function showStatus(message, type = 'info') {
+            document.getElementById('status-container').innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function showLoading(isLoading) {
+            document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
+        }
+
+        // --- SAC Routes Loading ---
+        async function loadSacRoutes() {
+            if (sacRoutesLayer) {
+                return; // Already loaded
+            }
+            
+            try {
+                console.log('🏔️ Loading SAC Alpine routes...');
+                showStatus('Loading SAC Alpine routes...', 'info');
+                
+                const response = await fetch('/sac_routes');
+                const result = await response.json();
+                
+                if (result.success) {
+                    const geojson = JSON.parse(result.geojson);
+                    console.log(`✅ Loaded ${geojson.features.length} SAC Alpine routes`);
+                    
+                    // Create layer with purple lines and white borders
+                    sacRoutesLayer = L.geoJSON(geojson, {
+                        style: function(feature) {
+                            return {
+                                color: '#8e44ad',     // Purple color
+                                weight: 3,           // Line width
+                                opacity: 0.8
+                            };
+                        },
+                        onEachFeature: function(feature, layer) {
+                            // Add popup with route info
+                            if (feature.properties) {
+                                const props = feature.properties;
+                                const popupContent = `
+                                    <div style="font-size: 12px;">
+                                        <strong>🏔️ SAC Alpine Route</strong><br>
+                                        ${props.route_name ? `<strong>Route:</strong> ${props.route_name}<br>` : ''}
+                                        ${props.destination_name ? `<strong>Destination:</strong> ${props.destination_name}<br>` : ''}
+                                        ${props.tour_type ? `<strong>Type:</strong> ${props.tour_type}<br>` : ''}
+                                        ${props.segment_title ? `<strong>Segment:</strong> ${props.segment_title}<br>` : ''}
+                                    </div>
+                                `;
+                                layer.bindPopup(popupContent);
+                            }
+                        }
+                    });
+                    
+                    // Add to the layer group instead of directly to map
+                    overlayMaps["SAC Alpine Routes"].addLayer(sacRoutesLayer);
+                    showStatus(`Loaded ${geojson.features.length} SAC Alpine routes`, 'success');
+                    
+                } else {
+                    console.error('❌ Failed to load SAC routes:', result.error);
+                    showStatus('Failed to load SAC Alpine routes', 'error');
+                }
+                
+            } catch (error) {
+                console.error('❌ Error loading SAC routes:', error);
+                showStatus('Error loading SAC Alpine routes', 'error');
+            }
+        }
+
+        // --- Elevation Profile Chart Functions ---
+        function displayElevationProfile(elevationProfile) {
+            // Destroy existing chart if it exists
+            if (elevationChart) {
+                elevationChart.destroy();
+                elevationChart = null;
+            }
+            
+            // Show the bottom elevation panel
+            const bottomPanel = document.getElementById('elevation-bottom-panel');
+            bottomPanel.style.display = 'block';
+            bottomPanel.classList.remove('collapsed');
+            
+            // Hide the old sidebar elevation chart
+            document.getElementById('elevation-chart-container').style.display = 'none';
+            
+            // Prepare data for Chart.js
+            const distances = elevationProfile.map(point => point[0]);
+            const elevations = elevationProfile.map(point => point[1]);
+            
+            // Create the chart in the bottom panel
+            const ctx = document.getElementById('elevation-bottom-chart').getContext('2d');
+            elevationChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: distances.map(d => (d / 1000).toFixed(1) + ' km'),
+                    datasets: [{
+                        label: 'Elevation',
+                        data: elevations,
+                        borderColor: '#007bff',
+                        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                        fill: true,
+                        tension: 0.1,
+                        pointRadius: 0,
+                        pointHoverRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return `Distance: ${context[0].label}`;
+                                },
+                                label: function(context) {
+                                    return `Elevation: ${context.parsed.y} m`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Distance (km)'
+                            }
+                        },
+                        y: {
+                            display: true,
+                            title: {
+                                display: true,
+                                text: 'Elevation (m)'
+                            }
+                        }
+                    },
+                    onHover: (event, activeElements) => {
+                        // Interactive hover functionality will be added here
+                        if (activeElements.length > 0) {
+                            const dataIndex = activeElements[0].index;
+                            showRoutePosition(dataIndex, elevationProfile);
+                        } else {
+                            hideRoutePosition();
+                        }
+                    }
+                }
+            });
+        }
+
+        // --- Multi-Point Routing Functions ---
+        function setupRoutingModeListeners() {
+            // Listen for routing mode changes
+            const toggle = document.getElementById('routing-mode-toggle');
+            toggle.addEventListener('change', function() {
+                routingMode = this.checked ? 'multi-point' : 'point-to-point';
+                console.log(`🔄 Routing mode changed to: ${routingMode}`);
+                
+                if (routingMode === 'multi-point') {
+                    document.getElementById('waypoints-container').style.display = 'block';
+                    document.getElementById('route-info').style.display = 'none';
+                    document.getElementById('points-panel').style.display = 'none';
+                    document.getElementById('calculate-btn').style.display = 'none';
+                    clearAll(); // Clear existing point-to-point route
+                } else {
+                    document.getElementById('waypoints-container').style.display = 'none';
+                    document.getElementById('route-info').style.display = 'block';
+                    document.getElementById('points-panel').style.display = 'block';
+                    document.getElementById('calculate-btn').style.display = 'inline-block';
+                    clearAll(); // Clear everything when switching back to point-to-point
+                }
+            });
+            
+            // Initialize the correct state based on default setting
+            if (routingMode === 'multi-point') {
+                document.getElementById('waypoints-container').style.display = 'block';
+                document.getElementById('route-info').style.display = 'none';
+                document.getElementById('points-panel').style.display = 'none';
+                document.getElementById('calculate-btn').style.display = 'none';
+            } else {
+                document.getElementById('waypoints-container').style.display = 'none';
+                document.getElementById('route-info').style.display = 'block';
+                document.getElementById('points-panel').style.display = 'block';
+                document.getElementById('calculate-btn').style.display = 'inline-block';
+            }
+        }
+
+        function addWaypoint(latlng) {
+            const waypointNumber = waypoints.length + 1;
+            const networkType = document.querySelector('input[name="network-type"]:checked').value;
+            
+            // Create custom marker based on position
+            let marker;
+            if (waypoints.length === 0) {
+                // First waypoint is the start
+                marker = createStartMarker(latlng);
+            } else {
+                // Intermediate waypoint - colored by network type for the NEXT segment
+                marker = createIntermediateMarker(latlng, networkType, waypointNumber);
+            }
+            
+            marker.addTo(map)
+                .bindPopup(`Waypoint ${waypointNumber}<br>${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}<br>Next segment: ${networkType}`);
+            
+            // Add drag event listener
+            marker.on('dragend', function(e) {
+                const waypointIndex = waypoints.findIndex(wp => wp.marker === marker);
+                if (waypointIndex !== -1) {
+                    waypoints[waypointIndex].latlng = e.target.getLatLng();
+                    updateWaypointCoords(waypointIndex);
+                    updateAffectedSegments(waypointIndex);
+                }
+            });
+            
+            // Create waypoint object
+            const waypoint = {
+                latlng: latlng,
+                marker: marker,
+                networkForNextSegment: networkType
+            };
+            
+            waypoints.push(waypoint);
+            addWaypointToUI(waypoint, waypointNumber);
+            
+            // Update all markers when a new point is added (to fix END marker positioning)
+            if (waypoints.length >= 2) {
+                updateWaypointMarkers();
+                rebuildWaypointsUI(); // Rebuild UI to show correct labels
+            }
+            
+            // If we have at least 2 waypoints, calculate only the new segment
+            if (waypoints.length >= 2) {
+                if (waypoints.length === 2) {
+                    // First route - calculate everything
+                    updateMultiPointRoute();
+                } else {
+                    // Additional point - only calculate the new segment
+                    const newSegmentIndex = waypoints.length - 2; // Segment from previous point to new point
+                    updateSpecificSegments([newSegmentIndex]);
+                }
+            }
+        }
+
+        function updateWaypointMarkers() {
+            // Update all waypoint markers to reflect their current role
+            waypoints.forEach((waypoint, index) => {
+                const isStart = index === 0;
+                const isEnd = index === waypoints.length - 1;
+                
+                // Remove old marker
+                map.removeLayer(waypoint.marker);
+                
+                // Create new marker with appropriate style
+                let newMarker;
+                if (isStart) {
+                    newMarker = createStartMarker(waypoint.latlng);
+                } else if (isEnd) {
+                    newMarker = createEndMarker(waypoint.latlng);
+                } else {
+                    // For intermediate points, color by the network type for the NEXT segment, numbered starting at 1
+                    newMarker = createIntermediateMarker(waypoint.latlng, waypoint.networkForNextSegment, index);
+                }
+                
+                // Add to map and bind popup
+                const popupText = isStart ? 'START' : isEnd ? 'END' : index.toString();
+                newMarker.addTo(map)
+                    .bindPopup(`${popupText}<br>${waypoint.latlng.lat.toFixed(5)}, ${waypoint.latlng.lng.toFixed(5)}${!isEnd ? `<br>Next segment: ${waypoint.networkForNextSegment}` : ''}`);
+                
+                // Add drag event listener
+                newMarker.on('dragend', function(e) {
+                    const waypointIndex = waypoints.findIndex(wp => wp.marker === newMarker);
+                    if (waypointIndex !== -1) {
+                        waypoints[waypointIndex].latlng = e.target.getLatLng();
+                        updateWaypointCoords(waypointIndex);
+                        updateAffectedSegments(waypointIndex);
+                    }
+                });
+                
+                // Update the waypoint object
+                waypoint.marker = newMarker;
+            });
+        }
+        
+        function updateAffectedSegments(waypointIndex) {
+            // Only recalculate segments that are affected by this waypoint change
+            console.log(`🔄 Smart routing: updating segments affected by waypoint ${waypointIndex + 1}`);
+            
+            if (waypoints.length < 2) return;
+            
+            // Determine which segments need to be recalculated
+            const segmentsToUpdate = [];
+            
+            // If it's the first waypoint, update segment 0 (first -> second)
+            if (waypointIndex === 0 && waypoints.length > 1) {
+                segmentsToUpdate.push(0);
+            }
+            // If it's the last waypoint, update the last segment (second-to-last -> last)
+            else if (waypointIndex === waypoints.length - 1 && waypoints.length > 1) {
+                segmentsToUpdate.push(waypointIndex - 1);
+            }
+            // If it's an intermediate waypoint, update both touching segments
+            else if (waypointIndex > 0 && waypointIndex < waypoints.length - 1) {
+                segmentsToUpdate.push(waypointIndex - 1); // Previous segment (previous -> this)
+                segmentsToUpdate.push(waypointIndex);     // Next segment (this -> next)
+            }
+            
+            console.log(`📍 Recalculating segments: ${segmentsToUpdate.join(', ')}`);
+            
+            // Recalculate only the affected segments
+            updateSpecificSegments(segmentsToUpdate);
+        }
+        
+        async function updateSpecificSegments(segmentIndices) {
+            // Efficiently update only specific route segments
+            if (segmentIndices.length === 0 || waypoints.length < 2) return;
+            
+            console.log(`⚡ Optimized routing: updating ${segmentIndices.length} segments instead of ${waypoints.length - 1} total segments`);
+            
+            let totalDistance = 0;
+            let totalSegments = 0;
+            
+            // First, remove the old route layers for affected segments only
+            segmentIndices.forEach(segmentIndex => {
+                if (routeLayers[segmentIndex * 2]) {
+                    map.removeLayer(routeLayers[segmentIndex * 2]);     // White outline
+                }
+                if (routeLayers[segmentIndex * 2 + 1]) {
+                    map.removeLayer(routeLayers[segmentIndex * 2 + 1]); // Colored center
+                }
+            });
+            
+            // Calculate new routes for affected segments
+            for (const segmentIndex of segmentIndices) {
+                if (segmentIndex >= waypoints.length - 1) continue; // Safety check
+                
+                const currentWaypoint = waypoints[segmentIndex];
+                const nextWaypoint = waypoints[segmentIndex + 1];
+                const networkType = currentWaypoint.networkForNextSegment;
+                
+                console.log(`🔄 Updating segment ${segmentIndex}: ${networkType} routing`);
+                
+                if (networkType === 'manual') {
+                    // Draw straight line
+                    const whiteOutline = L.polyline([currentWaypoint.latlng, nextWaypoint.latlng], {
+                        color: 'white',
+                        weight: 8,
+                        opacity: 0.8
+                    }).addTo(map);
+                    const coloredCenter = L.polyline([currentWaypoint.latlng, nextWaypoint.latlng], {
+                        color: NETWORK_COLORS[networkType],
+                        weight: 5
+                    }).addTo(map);
+                    
+                    // Update the route layers array
+                    routeLayers[segmentIndex * 2] = whiteOutline;
+                    routeLayers[segmentIndex * 2 + 1] = coloredCenter;
+                    
+                    // Calculate distance
+                    const distance = currentWaypoint.latlng.distanceTo(nextWaypoint.latlng) / 1000;
+                    totalDistance += distance;
+                    totalSegments++;
+                    
+                    // Store manual segment geometry
+                    const startLV95 = map.options.crs.projection.project(currentWaypoint.latlng);
+                    const endLV95 = map.options.crs.projection.project(nextWaypoint.latlng);
+                    
+                    const segmentGeometry = {
+                        lv95: [[startLV95.x, startLV95.y], [endLV95.x, endLV95.y]],
+                        latLng: [[currentWaypoint.latlng.lat, currentWaypoint.latlng.lng], [nextWaypoint.latlng.lat, nextWaypoint.latlng.lng]],
+                        networkType: 'manual'
+                    };
+                    segmentGeometries[segmentIndex] = segmentGeometry;
+                    
+                    // Store segment data at correct index
+                    segmentData[segmentIndex] = {
+                        distance: distance.toFixed(1),
+                        elevationGain: 0, // Manual segments assume flat
+                        elevationLoss: 0,
+                        networkType: networkType
+                    };
+                    
+                } else {
+                    // Use backend routing
+                    try {
+                        const response = await fetch('/calculate_route', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                start_coords: [currentWaypoint.latlng.lat, currentWaypoint.latlng.lng],
+                                end_coords: [nextWaypoint.latlng.lat, nextWaypoint.latlng.lng],
+                                buffer_distance: parseFloat(document.getElementById('buffer-slider').value) * 1000,
+                                network_type: networkType
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success && result.route) {
+                            // Draw the route with network-specific color (using proper coordinate transformation)
+                            console.log(`🗺️ Drawing route for segment ${segmentIndex}, got ${result.route.length} coordinates`);
+                            const routeCoords = result.route.map(coord => {
+                                const point = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                                return [point.lat, point.lng];
+                            });
+                            console.log(`🗺️ Transformed to ${routeCoords.length} lat/lng coordinates:`, routeCoords.slice(0, 3), '...');
+                            
+                            // Check if coordinates are in a reasonable range for Switzerland
+                            const firstCoord = routeCoords[0];
+                            const lastCoord = routeCoords[routeCoords.length - 1];
+                            console.log(`🧭 Route bounds: Start [${firstCoord[0].toFixed(4)}, ${firstCoord[1].toFixed(4)}] End [${lastCoord[0].toFixed(4)}, ${lastCoord[1].toFixed(4)}]`);
+                            
+                            // Check if coordinates are within Switzerland bounds (roughly lat 45.8-47.8, lng 5.9-10.5)
+                            const inBounds = routeCoords.every(coord => 
+                                coord[0] >= 45.0 && coord[0] <= 48.0 && coord[1] >= 5.0 && coord[1] <= 11.0
+                            );
+                            console.log(`🌍 Coordinates within Switzerland bounds: ${inBounds}`);
+                            const whiteOutline = L.polyline(routeCoords, {
+                                color: 'white',
+                                weight: 8,
+                                opacity: 0.8
+                            }).addTo(map);
+                            const coloredCenter = L.polyline(routeCoords, {
+                                color: NETWORK_COLORS[networkType],
+                                weight: 5
+                            }).addTo(map);
+                            console.log(`🎨 Added route layers to map: white outline + ${NETWORK_COLORS[networkType]} center`);
+                            
+                            // Update the route layers array
+                            routeLayers[segmentIndex * 2] = whiteOutline;
+                            routeLayers[segmentIndex * 2 + 1] = coloredCenter;
+                            console.log(`📊 Route layers array now has ${routeLayers.filter(l => l).length} layers`);
+                            
+                            totalDistance += result.path_length / 1000;
+                            totalSegments += result.segments_loaded;
+                            
+                            // Store backend route geometry
+                            if (result.route && result.route.length > 0) {
+                                const segmentCoords = result.route;
+                                const segmentLatLng = segmentCoords.map(coord => {
+                                    const latLng = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                                    return [latLng.lat, latLng.lng];
+                                });
+                                
+                                const segmentGeometry = {
+                                    lv95: segmentCoords,
+                                    latLng: segmentLatLng,
+                                    networkType: networkType
+                                };
+                                segmentGeometries[segmentIndex] = segmentGeometry;
+                            }
+                            
+                            // Calculate elevation stats from elevation profile
+                            let elevationStats = { elevationGain: 0, elevationLoss: 0 };
+                            if (result.elevation_profile && result.elevation_profile.length > 1) {
+                                elevationStats = calculateElevationStats(result.elevation_profile);
+                            }
+                            
+                            // Store segment data at correct index
+                            segmentData[segmentIndex] = {
+                                distance: (result.path_length / 1000).toFixed(1),
+                                elevationGain: elevationStats.elevationGain,
+                                elevationLoss: elevationStats.elevationLoss,
+                                networkType: networkType
+                            };
+                            
+                            // Store elevation data for the complete route
+                            if (result.elevation_profile && result.elevation_profile.length > 0) {
+                                if (!window.completeElevationProfile) {
+                                    window.completeElevationProfile = [];
+                                }
+                                // Calculate the starting distance for this segment
+                                let segmentStartDistance = 0;
+                                for (let j = 0; j < segmentIndex; j++) {
+                                    if (segmentData[j] && segmentData[j].distance) {
+                                        segmentStartDistance += parseFloat(segmentData[j].distance) * 1000; // Convert to meters
+                                    }
+                                }
+                                
+                                // Clear existing elevation data for this segment and rebuild
+                                window.completeElevationProfile = window.completeElevationProfile.filter((point, index) => {
+                                    return point[0] < segmentStartDistance || point[0] >= segmentStartDistance + result.path_length;
+                                });
+                                
+                                // Add new elevation data for this segment
+                                result.elevation_profile.forEach(point => {
+                                    window.completeElevationProfile.push([
+                                        segmentStartDistance + point[0],
+                                        point[1]
+                                    ]);
+                                });
+                                
+                                // Sort elevation profile by distance
+                                window.completeElevationProfile.sort((a, b) => a[0] - b[0]);
+                            }
+                            
+                        } else {
+                            console.error(`❌ Segment ${segmentIndex} routing failed:`, result.error);
+                            showStatus(`Segment ${segmentIndex + 1} routing failed: ${result.error}`, 'error');
+                        }
+                    } catch (error) {
+                        console.error(`❌ Segment ${segmentIndex} routing error:`, error);
+                        showStatus(`Segment ${segmentIndex + 1} routing error`, 'error');
+                    }
+                }
+            }
+            
+            // Update route info and refresh UI
+            if (totalDistance > 0 || segmentIndices.length > 0) {
+                // Calculate total distance from all segments
+                let completeDistance = 0;
+                let completeSegments = 0;
+                segmentData.forEach(segment => {
+                    if (segment && segment.distance) {
+                        completeDistance += parseFloat(segment.distance);
+                        completeSegments++;
+                    }
+                });
+                
+                document.getElementById('route-length').textContent = completeDistance.toFixed(2);
+                document.getElementById('segments-loaded').textContent = completeSegments;
+                document.getElementById('buffer-size').textContent = (parseFloat(document.getElementById('buffer-slider').value)).toFixed(1);
+                document.getElementById('route-info').style.display = 'block';
+                
+                // Refresh the waypoint UI with updated segment data
+                rebuildWaypointsUI();
+                
+                // Rebuild complete route geometry and get elevation profile
+                await rebuildCompleteRouteGeometry();
+                
+                // Get elevation profile for the complete route
+                if (completeRouteGeometry.length > 1) {
+                    console.log(`🗻 Getting elevation profile for updated complete route with ${completeRouteGeometry.length} coordinates`);
+                    await getCompleteRouteElevationProfile();
+                }
+                
+                showStatus(`Updated ${segmentIndices.length} route segment${segmentIndices.length > 1 ? 's' : ''}`, 'success');
+            }
+        }
+
+        function createWaypointUIElement(waypoint, actualIndex) {
+            const waypointDiv = document.createElement('div');
+            
+            // Determine waypoint type based on actual position in the full array
+            const isStart = actualIndex === 0;
+            const isEnd = actualIndex === waypoints.length - 1 && waypoints.length > 1;
+            const isIntermediate = !isStart && !isEnd;
+            
+            // Set CSS classes and labels
+            let cssClass = 'waypoint-item';
+            let label = '';
+            let labelClass = '';
+            
+            if (isStart) {
+                cssClass += ' start';
+                label = 'START';
+                labelClass = 'start';
+            } else if (isEnd) {
+                cssClass += ' end';
+                label = 'END';
+                labelClass = 'end';
+            } else {
+                cssClass += ' intermediate';
+                label = actualIndex.toString(); // Intermediate points numbered 1, 2, 3...
+                labelClass = 'intermediate';
+            }
+            
+            waypointDiv.className = cssClass;
+            
+            // Get segment data if available (for non-start waypoints)
+            const segmentInfo = segmentData[actualIndex - 1] || null;
+            const showSegmentInfo = !isStart && segmentInfo;
+            
+            waypointDiv.innerHTML = `
+                <div class="waypoint-header">
+                    <span class="waypoint-label ${labelClass}">${label}</span>
+                    <button class="waypoint-remove" onclick="removeWaypoint(${actualIndex})">×</button>
+                </div>
+                <div class="waypoint-coords">${waypoint.latlng.lat.toFixed(5)}, ${waypoint.latlng.lng.toFixed(5)}</div>
+                ${!isStart ? `
+                    <div class="waypoint-segment-info">
+                        <div class="waypoint-network-info">
+                            <span class="network-color-indicator" style="background-color: ${NETWORK_COLORS[waypoint.networkForNextSegment] || '#6c757d'};"></span>
+                            <select class="waypoint-network-select" onchange="updateWaypointNetwork(${actualIndex}, this.value)">
+                    <option value="ski_touring" ${waypoint.networkForNextSegment === 'ski_touring' ? 'selected' : ''}>🎿 Ski</option>
+                                <option value="sac_alpine" ${waypoint.networkForNextSegment === 'sac_alpine' ? 'selected' : ''}>🏔️ SAC</option>
+                    <option value="tlm3d" ${waypoint.networkForNextSegment === 'tlm3d' ? 'selected' : ''}>🚗 TLM3D</option>
+                    <option value="manual" ${waypoint.networkForNextSegment === 'manual' ? 'selected' : ''}>📏 Manual</option>
+                </select>
+                        </div>
+                        <div class="waypoint-stats">
+                            ${showSegmentInfo ? 
+                                `${segmentInfo.distance}km ${segmentInfo.elevationGain > 0 || segmentInfo.elevationLoss > 0 ? 
+                                    (segmentInfo.elevationGain > 0 ? '+' + segmentInfo.elevationGain : '') + 
+                                    (segmentInfo.elevationLoss > 0 ? '/-' + segmentInfo.elevationLoss : '') + ' m' 
+                                    : ''}` 
+                                : 'Calculating...'}
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+            
+            return waypointDiv;
+        }
+        
+        function addWaypointToUI(waypoint, waypointNumber) {
+            const waypointsList = document.getElementById('waypoints-list');
+            const waypointDiv = createWaypointUIElement(waypoint, waypoints.length - 1);
+            waypointsList.appendChild(waypointDiv);
+        }
+
+        function updateWaypointCoords(index) {
+            const waypoint = waypoints[index];
+            const waypointDiv = document.querySelectorAll('.waypoint-item')[index];
+            if (waypointDiv) {
+                waypointDiv.querySelector('.waypoint-coords').textContent = 
+                    `${waypoint.latlng.lat.toFixed(5)}, ${waypoint.latlng.lng.toFixed(5)}`;
+            }
+        }
+
+        function updateWaypointNetwork(index, networkType) {
+            waypoints[index].networkForNextSegment = networkType;
+            updateMultiPointRoute();
+        }
+
+        function removeWaypoint(index) {
+            // Remove marker from map
+            if (waypoints[index].marker) {
+                map.removeLayer(waypoints[index].marker);
+            }
+            
+            // Remove from waypoints array
+            waypoints.splice(index, 1);
+            
+            // Update marker styles for remaining waypoints
+            if (waypoints.length > 0) {
+                updateWaypointMarkers();
+            }
+            
+            // Rebuild UI and recalculate route
+            rebuildWaypointsUI();
+            if (waypoints.length >= 2) {
+                updateMultiPointRoute();
+            } else {
+                clearAllRouteLayers();
+            }
+        }
+
+        function rebuildWaypointsUI() {
+            const waypointsList = document.getElementById('waypoints-list');
+            waypointsList.innerHTML = '';
+            
+            waypoints.forEach((waypoint, index) => {
+                const waypointDiv = createWaypointUIElement(waypoint, index);
+                waypointsList.appendChild(waypointDiv);
+            });
+        }
+
+        function clearAllWaypoints() {
+            // Remove all markers from map
+            waypoints.forEach(waypoint => {
+                if (waypoint.marker) {
+                    map.removeLayer(waypoint.marker);
+                }
+            });
+            
+            // Clear arrays and UI
+            waypoints = [];
+            routeLayers = [];
+            segmentData = [];
+            completeRouteGeometry = [];
+            completeRouteLatLng = [];
+            segmentGeometries = [];
+            document.getElementById('waypoints-list').innerHTML = '';
+            clearAllRouteLayers();
+            
+            // Clear elevation profile
+            if (elevationChart) {
+                elevationChart.destroy();
+                elevationChart = null;
+            }
+            document.getElementById('elevation-chart-container').style.display = 'none';
+            window.completeElevationProfile = [];
+        }
+
+        function clearAllRouteLayers() {
+            routeLayers.forEach(layer => {
+                if (layer) {
+                    map.removeLayer(layer);
+                }
+            });
+            routeLayers = [];
+        }
+
+        async function updateMultiPointRoute() {
+            clearAllRouteLayers();
+            
+            if (waypoints.length < 2) return;
+            
+            // Reset elevation profile, segment data, and route geometry for new route
+            window.completeElevationProfile = [];
+            segmentData = [];
+            completeRouteGeometry = [];
+            completeRouteLatLng = [];
+            segmentGeometries = [];
+            
+            let totalDistance = 0;
+            let totalSegments = 0;
+            
+            for (let i = 0; i < waypoints.length - 1; i++) {
+                const currentWaypoint = waypoints[i];
+                const nextWaypoint = waypoints[i + 1];
+                const networkType = currentWaypoint.networkForNextSegment;
+                
+                if (networkType === 'manual') {
+                    // Draw straight line with network-specific color
+                    const whiteOutline = L.polyline([currentWaypoint.latlng, nextWaypoint.latlng], {
+                        color: 'white',
+                        weight: 8,
+                        opacity: 0.8
+                    }).addTo(map);
+                    const coloredCenter = L.polyline([currentWaypoint.latlng, nextWaypoint.latlng], {
+                        color: NETWORK_COLORS[networkType],
+                        weight: 5
+                    }).addTo(map);
+                    routeLayers.push(whiteOutline, coloredCenter);
+                    
+                    // Calculate distance
+                    const distance = currentWaypoint.latlng.distanceTo(nextWaypoint.latlng) / 1000;
+                    totalDistance += distance;
+                    totalSegments++;
+                    
+                    // Store manual segment geometry
+                    const startLV95 = map.options.crs.projection.project(currentWaypoint.latlng);
+                    const endLV95 = map.options.crs.projection.project(nextWaypoint.latlng);
+                    
+                    const segmentGeometry = {
+                        lv95: [[startLV95.x, startLV95.y], [endLV95.x, endLV95.y]],
+                        latLng: [[currentWaypoint.latlng.lat, currentWaypoint.latlng.lng], [nextWaypoint.latlng.lat, nextWaypoint.latlng.lng]],
+                        networkType: 'manual'
+                    };
+                    segmentGeometries[i] = segmentGeometry;
+                    
+                    // Add to complete route geometry
+                    if (i === 0) {
+                        completeRouteGeometry.push([startLV95.x, startLV95.y]);
+                        completeRouteLatLng.push([currentWaypoint.latlng.lat, currentWaypoint.latlng.lng]);
+                    }
+                    completeRouteGeometry.push([endLV95.x, endLV95.y]);
+                    completeRouteLatLng.push([nextWaypoint.latlng.lat, nextWaypoint.latlng.lng]);
+                    
+                    // Store segment data at correct index
+                    segmentData[i] = {
+                        distance: distance.toFixed(1),
+                        elevationGain: 0, // Manual segments assume flat
+                        elevationLoss: 0,
+                        networkType: networkType
+                    };
+                    
+                    // For manual segments, create a simple elevation profile (flat line)
+                    if (!window.completeElevationProfile) {
+                        window.completeElevationProfile = [];
+                    }
+                    const segmentStartDistance = window.completeElevationProfile.length > 0 ? 
+                        window.completeElevationProfile[window.completeElevationProfile.length - 1][0] : 0;
+                    
+                    // Add start and end points with estimated elevation (you could fetch this separately if needed)
+                    window.completeElevationProfile.push([segmentStartDistance, 1000]); // Start elevation
+                    window.completeElevationProfile.push([segmentStartDistance + distance * 1000, 1000]); // End elevation
+                } else {
+                    // Use backend routing
+                    try {
+                        const response = await fetch('/calculate_route', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                start_coords: [currentWaypoint.latlng.lat, currentWaypoint.latlng.lng],
+                                end_coords: [nextWaypoint.latlng.lat, nextWaypoint.latlng.lng],
+                                network_type: networkType,
+                                buffer_distance: parseFloat(document.getElementById('buffer-slider').value) * 1000
+                            })
+                        });
+                        
+                        if (response.ok) {
+                            const result = await response.json();
+                            if (result.success && result.route) {
+                                // Convert route coordinates for display (using proper coordinate transformation)
+                                const routeLatLngs = result.route.map(coord => {
+                                    const point = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                                    return [point.lat, point.lng];
+                                });
+                                
+                                // Use the same thick orange style as single routes
+                                const whiteOutline = L.polyline(routeLatLngs, {
+                                    color: 'white',
+                                    weight: 8,
+                                    opacity: 0.8
+                                }).addTo(map);
+                                const coloredCenter = L.polyline(routeLatLngs, {
+                                    color: NETWORK_COLORS[networkType],
+                                    weight: 5
+                                }).addTo(map);
+                                routeLayers.push(whiteOutline, coloredCenter);
+                                
+                                const segmentDistance = result.path_length / 1000;
+                                totalDistance += segmentDistance;
+                                totalSegments += result.segments_loaded;
+                                
+                                // Store backend route geometry
+                                if (result.route && result.route.length > 0) {
+                                    const segmentCoords = result.route;
+                                    const segmentLatLng = segmentCoords.map(coord => {
+                                        const latLng = map.options.crs.projection.unproject({ x: coord[0], y: coord[1] });
+                                        return [latLng.lat, latLng.lng];
+                                    });
+                                    
+                                    const segmentGeometry = {
+                                        lv95: segmentCoords,
+                                        latLng: segmentLatLng,
+                                        networkType: networkType
+                                    };
+                                    segmentGeometries[i] = segmentGeometry;
+                                    
+                                    // Add to complete route geometry
+                                    if (i === 0) {
+                                        completeRouteGeometry.push(segmentCoords[0]);
+                                        completeRouteLatLng.push(segmentLatLng[0]);
+                                    }
+                                    
+                                    // Add all coordinates except the first (to avoid duplication)
+                                    for (let j = 1; j < segmentCoords.length; j++) {
+                                        completeRouteGeometry.push(segmentCoords[j]);
+                                        completeRouteLatLng.push(segmentLatLng[j]);
+                                    }
+                                }
+                                
+                                // Calculate elevation stats from elevation profile
+                                let elevationStats = { elevationGain: 0, elevationLoss: 0 };
+                                if (result.elevation_profile && result.elevation_profile.length > 1) {
+                                    elevationStats = calculateElevationStats(result.elevation_profile);
+                                }
+                                
+                                // Store segment data at correct index
+                                segmentData[i] = {
+                                    distance: segmentDistance.toFixed(1),
+                                    elevationGain: elevationStats.elevationGain,
+                                    elevationLoss: elevationStats.elevationLoss,
+                                    networkType: networkType
+                                };
+                                
+                                // Store elevation data for the complete route
+                                if (result.elevation_profile && result.elevation_profile.length > 0) {
+                                    if (!window.completeElevationProfile) {
+                                        window.completeElevationProfile = [];
+                                    }
+                                    // Add segment elevation data with cumulative distance
+                                    const segmentStartDistance = window.completeElevationProfile.length > 0 ? 
+                                        window.completeElevationProfile[window.completeElevationProfile.length - 1][0] : 0;
+                                    
+                                    result.elevation_profile.forEach(point => {
+                                        window.completeElevationProfile.push([
+                                            segmentStartDistance + point[0],
+                                            point[1]
+                                        ]);
+                                    });
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error calculating route segment:', error);
+                    }
+                }
+            }
+            
+            // Update route info
+            document.getElementById('route-length').textContent = totalDistance.toFixed(2);
+            document.getElementById('segments-loaded').textContent = totalSegments;
+            document.getElementById('buffer-size').textContent = (parseFloat(document.getElementById('buffer-slider').value)).toFixed(1);
+            
+            // Get elevation profile for the complete continuous route
+            if (completeRouteGeometry.length > 1) {
+                console.log(`🗻 Getting elevation profile for complete route with ${completeRouteGeometry.length} coordinates`);
+                await getCompleteRouteElevationProfile();
+            }
+            
+            // Refresh the waypoint UI with updated segment data
+            rebuildWaypointsUI();
+        }
+
+        // --- Elevation Panel Toggle Functions ---
+        function setupElevationPanelToggle() {
+            const toggleBtn = document.getElementById('elevation-toggle-btn');
+            const panel = document.getElementById('elevation-bottom-panel');
+            const header = document.querySelector('.elevation-panel-header');
+            
+            function togglePanel() {
+                panel.classList.toggle('collapsed');
+                toggleBtn.classList.toggle('collapsed');
+                
+                // Resize chart when panel is expanded
+                if (!panel.classList.contains('collapsed') && elevationChart) {
+                    setTimeout(() => {
+                        elevationChart.resize();
+                    }, 300);
+                }
+            }
+            
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                togglePanel();
+            });
+            
+            header.addEventListener('click', togglePanel);
+        }
+
+        // Interactive hover functions for elevation profile
+        let routePositionMarker = null;
+
+        function showRoutePosition(dataIndex, elevationProfile) {
+            if (!completeRouteLatLng || completeRouteLatLng.length === 0) return;
+            
+            // Calculate the position along the route based on the data index
+            const totalPoints = elevationProfile.length;
+            const routePoints = completeRouteLatLng.length;
+            
+            // Map elevation profile index to route coordinate index
+            const routeIndex = Math.round((dataIndex / totalPoints) * (routePoints - 1));
+            
+            if (routeIndex < 0 || routeIndex >= routePoints) return;
+            
+            const position = completeRouteLatLng[routeIndex];
+            
+            // Remove existing marker
+            if (routePositionMarker) {
+                map.removeLayer(routePositionMarker);
+            }
+            
+            // Add new position marker
+            routePositionMarker = L.circleMarker([position[0], position[1]], {
+                radius: 8,
+                fillColor: '#ff0000',
+                color: '#ffffff',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).addTo(map);
+        }
+
+        function hideRoutePosition() {
+            if (routePositionMarker) {
+                map.removeLayer(routePositionMarker);
+                routePositionMarker = null;
+            }
+        }
+
+        // --- Initial Load ---
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            setupRoutingModeListeners();
+            setupElevationPanelToggle();
+        });
+    </script>
+</body>
+</html>

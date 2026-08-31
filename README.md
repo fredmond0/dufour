@@ -118,11 +118,13 @@ dufour/
 │   └── tiles.py        # Web Mercator slippy-map tile math (EPSG:3857)
 ├── scripts/
 │   ├── 01_build_dataset.py  # Harvester & regional holdout dataset builder
+│   ├── 02_train.py          # Neural training harness (Pix2Pix / cGAN)
+│   ├── 03_render.py         # Full-pipeline map rendering and compositor
 │   ├── palette.py           # K-means recovery of swisstopo area fill ink palette
 │   └── palette_lines.py     # Local-median deviation k-means for fine line feature inks
 ├── data/
-│   ├── tiles/               # On-disk tile cache (dem/ and map/)
-│   ├── osm/                 # On-disk Overpass vector cache
+│   ├── tiles/               # On-disk tile cache (dem/ and map/) [gitignored]
+│   ├── osm/                 # On-disk Overpass vector cache [gitignored]
 │   ├── train.json           # Training tile manifest
 │   └── val.json             # Validation tile manifest (held-out massifs)
 └── out/                     # Diagnostic outputs, delabel comparisons, and harvest logs
@@ -168,16 +170,3 @@ Run empirical palette recovery scripts:
 python scripts/palette.py
 python scripts/palette_lines.py
 ```
-
----
-
-## 🗺️ Roadmap
-
-- [x] Tile harvesting, caching, and regional holdout splitting
-- [x] Computer-vision delabeling & inpainting pipeline
-- [x] 11-channel multi-azimuth DEM feature extraction
-- [x] Pix2Pix U-Net and PatchGAN architecture with `GroupNorm`
-- [x] OpenStreetMap Overpass extraction and LK25 symbology spec
-- [ ] Training harness (`scripts/02_train.py`)
-- [ ] Vector rendering compositor (`dufour/render.py`)
-- [ ] Global inference CLI (`scripts/03_render_map.py`) for rendering any alpine region worldwide in authentic Swiss Topo style.
