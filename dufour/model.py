@@ -26,9 +26,17 @@ class Down(nn.Module):
 
 
 class Up(nn.Module):
+    """Nearest-neighbour upsample + 3x3 conv, NOT a transposed conv.
+
+    Stride-2 transposed convolutions distribute output contributions unevenly
+    and stamp a regular checkerboard into the result -- clearly visible in the
+    epoch-0 samples. On a map whose whole subject is fine line texture, that
+    artifact is indistinguishable from bad hachures."""
+
     def __init__(self, i, o, drop=False):
         super().__init__()
-        L = [nn.ConvTranspose2d(i, o, 4, 2, 1, bias=False), _norm(o)]
+        L = [nn.Upsample(scale_factor=2, mode="nearest"),
+             nn.Conv2d(i, o, 3, 1, 1, bias=False), _norm(o)]
         if drop:
             L.append(nn.Dropout(0.5))
         L.append(nn.ReLU(True))
@@ -59,7 +67,8 @@ class Generator(nn.Module):
         self.u6 = Up(w * 8, w * 2)
         self.u7 = Up(w * 4, w)
         self.out = nn.Sequential(
-            nn.ConvTranspose2d(w * 2, out_ch, 4, 2, 1), nn.Tanh())
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.Conv2d(w * 2, out_ch, 3, 1, 1), nn.Tanh())
 
     def forward(self, x):
         d1 = self.d1(x); d2 = self.d2(d1); d3 = self.d3(d2); d4 = self.d4(d3)

@@ -38,26 +38,52 @@ def _dist(rgb, colours):
     return d
 
 
-def _neutral(rgb, tol=16):
-    """Grey-ish pixels: max channel spread small. These are shading/hachure."""
+def chroma(rgb):
+    """Channel spread. The single most useful discriminator in this whole file.
+
+    swisstopo's relief plate is a DESATURATED blue-grey (#9ba6ad, spread 18);
+    its coloured ink is saturated (contour #9d8c68 spread 53, water-line
+    #4d7f99 spread 76). Colour distance alone confuses the two -- the shading
+    grey sits within 36 units of the water blue -- and the result is that a
+    4478 m rock face gets masked as "water" and "forest". Requiring real
+    saturation separates them cleanly."""
     f = rgb.astype(np.int16)
-    return (f.max(-1) - f.min(-1)) <= tol
+    return (f.max(-1) - f.min(-1))
 
 
-def deterministic_mask(rgb, thresh=52, grow=1):
+def _neutral(rgb, tol=26):
+    return chroma(rgb) <= tol
+
+
+def deterministic_mask(rgb, thresh=38, min_chroma=25, grow=1):
     """Pixels owned by the deterministic renderer."""
     m = np.zeros(rgb.shape[:2], bool)
     for colours in DETERMINISTIC.values():
         m |= _dist(rgb, colours) < thresh
-    m &= ~_neutral(rgb)          # never sacrifice grey rock drawing
+    # Two independent guards: the pixel must be close to a known ink colour
+    # AND actually saturated. Either alone lets the relief plate through.
+    m &= chroma(rgb) >= min_chroma
+    m &= ~_neutral(rgb)
     if grow:
         m = binary_dilation(m, np.ones((2 * grow + 1, 2 * grow + 1)))
     return m
 
 
+def ignore_mask(rgb):
+    """Pixels the generator must NOT be supervised on.
+
+    Everything the deterministic renderer owns (contours, water, forest tint,
+    route ink) plus all lettering. We do not inpaint these any more: diffusion
+    fill leaves smooth grey discs, and an L1 loss over thousands of such discs
+    teaches the network that rock faces contain textureless blobs. Masking the
+    loss instead removes the pixels from supervision entirely, with no
+    synthetic texture for the model to imitate.
+    """
+    return deterministic_mask(rgb) | text_mask(rgb)
+
+
 def terrain_layer(rgb, drop_text=True):
-    """Return (terrain_rgb, mask) -- swisstopo with the deterministic ink
-    removed, i.e. the relief-and-rock layer the network should learn."""
+    """Legacy inpainting path, kept for visual inspection only."""
     m = deterministic_mask(rgb)
     if drop_text:
         m = m | text_mask(rgb)

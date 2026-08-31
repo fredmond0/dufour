@@ -15,6 +15,8 @@ os.environ.setdefault("AWS_NO_SIGN_REQUEST", "YES")
 os.environ.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
 os.environ.setdefault("CPL_VSIL_CURL_CACHE_SIZE", "200000000")
 
+import threading
+
 import numpy as np
 import rasterio
 from rasterio.windows import from_bounds
@@ -23,7 +25,19 @@ from scipy.ndimage import map_coordinates
 BASE = ("/vsicurl/https://copernicus-dem-30m.s3.amazonaws.com/"
         "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/"
         "Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif")
-_open = {}
+# GDAL dataset handles are NOT thread-safe. Sharing one /vsicurl handle across
+# prefetch threads trips an assertion inside libtiff, so each thread keeps its
+# own handle cache.
+_local = threading.local()
+
+
+def _ds(url):
+    cache = getattr(_local, "cache", None)
+    if cache is None:
+        cache = _local.cache = {}
+    if url not in cache:
+        cache[url] = rasterio.open(url)
+    return cache[url]
 
 
 def _url(lat_deg, lon_deg):
@@ -56,9 +70,7 @@ def sample(frame, pad_px=256):
         for lo in range(lon_lo, lon_hi + 1):
             u = _url(la, lo)
             try:
-                if u not in _open:
-                    _open[u] = rasterio.open(u)
-                ds = _open[u]
+                ds = _ds(u)
             except Exception:
                 continue
             m = (lat >= la) & (lat < la + 1) & (lon >= lo) & (lon < lo + 1)
@@ -86,7 +98,8 @@ def sample(frame, pad_px=256):
 
     if np.isnan(out).any():
         out = np.nan_to_num(out, nan=float(np.nanmedian(out)))
-    return out, pad_px
+    # Copernicus nodata is a large sentinel; clip before any float16 cast.
+    return np.clip(out, -500.0, 9000.0), pad_px
 
 
 # --- per-tile access for training -----------------------------------------
@@ -105,10 +118,10 @@ def tile(z, x, y, pad_px=96):
     dest = TILE_CACHE / f"{z}/{x}/{y}_{pad_px}.npy"
     if dest.exists():
         try:
-            return np.load(dest)
+            return np.load(dest).astype(np.float32)
         except Exception:
             pass
     arr, _ = sample(Frame(z, x, y, 1, 1), pad_px=pad_px)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    np.save(dest, arr.astype(np.float32))
+    np.save(dest, arr.astype(np.float16))   # ~0.4 MB/tile instead of 0.8
     return arr

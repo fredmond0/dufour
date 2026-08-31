@@ -1,172 +1,128 @@
 # dufour
 
-> **Generating authentic Swiss Federal Topographic maps (swisstopo 1:25,000) from raw DEMs and OpenStreetMap vectors using a hybrid neural-deterministic pipeline.**
+Swiss-style topographic maps for any mountainous area, from free global data.
 
----
+Named for the Dufourkarte, the 19th-century survey whose relief drawing set the
+house style that swisstopo still prints.
 
-## 🏔️ Background & Motivation
+## The architecture, and why
 
-Switzerland’s national topographic maps—traditionally the **Landeskarte 1:25'000 (LK25 / PK25)**—are widely regarded as the gold standard of mountain cartography. Pioneered by **General Guillaume-Henri Dufour** in the 19th century and refined by master cartographers like **Eduard Imhof**, the Swiss style is characterized by:
-- **Dynamic relief shading** that rotates and blends illumination across ridges to preserve slope clarity.
-- **Detailed rock drawing and hachuring** depicting cliff faces, couloirs, and scree fields.
-- **Subtle glacier textures and contour shading**.
-- **Meticulously balanced typography, roads, and trails** specified in exact paper millimeters.
-
-Traditional computer-generated hillshades look sterile and flat compared to hand-drawn Swiss relief. However, training a standard generative model (e.g., standard pix2pix or Diffusion) directly on raster map scans fails because the model hallucinates nonsensical roads, garbled cabin names, and text-shaped noise.
-
-**`dufour` solves this by decoupling the map into two distinct layers:**
-1. **Neural Component (Pix2Pix GAN):** Learns the complex, artistic terrain texturing—rock hachuring, cliff shading, glacier rendering, and multi-light relief—conditioned on an 11-channel DEM feature tensor.
-2. **Deterministic Component (OSM + Vector Symbology):** Fetches real OpenStreetMap geometry (roads, railways with tick marks, hiking paths with dash intervals, aerial tramways with pylons, waterways, buildings) and renders them using exact, empirically measured swisstopo ink formulations and paper-millimeter specifications.
-
----
-
-## 🏗️ System Architecture
+A single image-to-image model trained on swisstopo tiles produces something
+that *looks* Swiss and is *cartographically fictional*: hallucinated roads,
+text-shaped smudges, contours that do not close. So the work is split by what
+each half is actually good at.
 
 ```
-                                  [DATA SOURCES]
-                 AWS Terrarium DEM Tile            swisstopo PK25 Map Tile
-               (256x256 32-bit elevation)         (256x256 1:25,000 raster)
-                          │                                  │
-                          ▼                                  ▼
-                [dufour/fetch.py]                  [dufour/fetch.py]
-                          │                                  │
-                          │                          [dufour/quality.py]
-                          │                         (Filter text & low relief)
-                          │                                  │
-                          │                          [dufour/delabel.py]
-                          │                         (Inpaint letters & spot heights)
-                          │                                  │
-                          ▼                                  ▼
-                 [dufour/features.py]                Clean Target Raster
-              (11-channel multi-azimuth stack)               │
-                          │                                  │
-                          └──────────────┬───────────────────┘
-                                         ▼
-                                [dufour/dataset.py]
-                             (Rotation-safe augmentation)
-                                         │
-                                         ▼
-                                 [dufour/model.py]
-                            (Pix2Pix U-Net Generator +
-                              70x70 PatchGAN Discriminator)
-                                         │
-                                         ▼
-                              Learned Swiss Terrain Base
-                                         │
-                                         ▼  + [dufour/osm.py] (Overpass Vector Geometry)
-                                            + [dufour/legend.py] (LK25 Symbology Specs & Inks)
-                                            + [dufour/frame.py] (Pixel Grid Compositor)
-                                         │
-                                         ▼
-                         [FINAL SWISSTOPO-STYLE MAP PRODUCT]
+                 ┌───────────────────────────────────────────┐
+  Copernicus ───►│ LEARNED   relief shading + rock hachures   │──┐
+  GLO-30 DEM     │ (pix2pix U-Net, 16 conditioning channels)  │  │
+  Sentinel-2 ───►└───────────────────────────────────────────┘  │
+                                                                ├─► sheet
+  DEM        ───►┌───────────────────────────────────────────┐  │
+  OpenStreetMap ►│ DETERMINISTIC  contours, landcover, roads, │──┘
+                 │ trails, buildings, labels, spot heights    │
+                 └───────────────────────────────────────────┘
 ```
 
----
+The network draws only what cannot be derived from data: interpretive relief
+shading and Felszeichnung (rock drawing). Every feature with a right answer —
+where a trail runs, how wide a road is, what a summit's elevation is — is
+rendered from vector data against the LK25 legend and is exactly correct.
 
-## 🔬 Key Engineering & Cartographic Innovations
+## Data, all free
 
-### 1. Computer Vision "Delabeling" Pipeline (`dufour/delabel.py` & `quality.py`)
-A DEM has zero information about place names (e.g., *"Matterhorn"*, *"Solvaybiwak SAC"*) or spot heights (`4478`). Any lettering left in the training target forces the neural network to emit text-shaped noise smudges.
-- **Morphological Differentiation:** Unlike contour lines (which are huge, elongated components) and rock hachures (which occur in dense stroke clusters), text glyphs are **small, solid, and isolated on light backgrounds**.
-- **Isolation Testing:** Calculates the local dark-pixel density within a window. Glyphs surrounded by light background are flagged as text; strokes in dense hachure fields are preserved.
-- **Diffusion Inpainting:** Cleans the flagged glyphs via iterative Gaussian diffusion fill before feeding them to the training dataset.
+| Layer | Source | Licence | Coverage |
+|---|---|---|---|
+| Training target | swisstopo LK25 raster WMTS | swisstopo OpenData, CC-BY | Switzerland |
+| Elevation | Copernicus DEM GLO-30 (AWS) | free, open | global, uniform 30 m |
+| Imagery | EOX s2cloudless (Sentinel-2) | CC BY-NC-SA 4.0 | global, 10 m |
+| Vectors | OpenStreetMap via Overpass | ODbL | global |
 
-### 2. 11-Channel Terrain Conditioning Stack (`dufour/features.py`)
-Rather than passing raw elevation values or a single 315° hillshade, the DEM is pre-filtered to a 45m ground cutoff (eliminating patchwork sensor resolution artifacts) and expanded into an 11-channel physics and cartography tensor:
-- **`hs315`, `hs045`, `hs135`, `hs225` (4 channels):** Multi-azimuth illumination angles allowing the network to learn Eduard Imhof's principle of rotating light along opposing mountain aspects.
-- **`slope`:** Normalized slope gradient.
-- **`elev_abs`:** Absolute elevation scaled to 9,000m (informs treeline, snowline, and vegetation zones).
-- **`elev_loc`:** Local relative elevation percentile (2nd–98th percentile).
-- **`curv`:** Surface Laplacian (ridge [+] vs. valley [-] detector).
-- **`aspect_s`, `aspect_c`:** $\sin(\text{aspect})$ and $\cos(\text{aspect})$ continuous directional components (avoiding $0^\circ / 360^\circ$ wrap discontinuities).
-- **`rough`:** Surface roughness (standard deviation filter).
+All served on the standard XYZ tile grid, so every layer is pixel-aligned by
+construction — no reprojection anywhere in the pipeline.
 
-### 3. Leak-Free Regional Holdout (`scripts/01_build_dataset.py`)
-Random tile splitting causes massive validation leakage because adjacent tiles share mountain faces, causing the model to memorize specific peaks.
-- **Massif Isolation:** Entire mountain massifs (**Bernina** and **Uri**) are strictly isolated into the validation set, testing whether the model truly generalizes to unseen alpine topography.
+## Decisions that turned out to matter
 
-### 4. Rotation-Safe Data Augmentation (`dufour/dataset.py`)
-Deriving features after spatial rotation:
-- Rotating finished feature stacks corrupts aspect channels (which store bearing values).
-- The pipeline rotates the **raw DEM before feature derivation**, preserving strict mathematical consistency across all 11 channels.
+**Copernicus, not the AWS terrain tiles.** The terrain tiles are a patchwork —
+10 m 3DEP in the USA, SRTM in Patagonia, EU-DEM in the Alps. A model trained on
+Swiss inputs would meet out-of-distribution terrain everywhere else. GLO-30 is
+TanDEM-X derived and uniform worldwide, and visibly sharper in high mountains.
 
-### 5. Empirically Recovered Inks & Paper-Millimeter Symbology (`dufour/legend.py`)
-- Inks were extracted via $k$-means clustering across high-alpine and valley map tiles (`scripts/palette.py`, `scripts/palette_lines.py`):
-  - **Rock Contour Brown:** `#9d8c68` (`RGB 157, 140, 104`)
-  - **Glacier Contour Blue:** `#7ba6bd` (`RGB 123, 166, 189`)
-  - **Watercourse Line:** `#4d7f99` (`RGB 77, 127, 153`)
-  - **Meadow Buff:** `#f4f3e2` (`RGB 244, 243, 226`)
-  - **Forest Green:** `#c9dcb0` (`RGB 201, 220, 175`)
-- Feature widths are defined in **paper millimeters at 1:25,000 scale** (e.g. primary roads $= 0.80\text{ mm}$, hiking paths $= 0.20\text{ mm}$ dashed), converted dynamically to pixel widths at any zoom level.
+**Not swissALTI3D.** Switzerland's 2 m LiDAR is free and tempting, but training
+on 2 m and inferring on 30 m is a severe domain gap: the model would learn to
+read cliff microstructure that does not exist in the input anywhere else. Train
+on the DEM you will infer with.
 
----
+**Ridge enhancement.** A 30 m DEM shaded naively turns the Matterhorn into a
+cone — its aretes are 50–100 m wide, at the sampling limit. `swiss_relief()`
+unsharp-masks the surface before lighting it, blends fine/mid/coarse
+illumination, and applies local contrast, which is the analytic equivalent of
+what Swiss cartographers do by hand.
 
-## 📁 Repository Structure
+**Neural text detection + masked loss, not heuristic inpainting.** Classical
+morphological filters struggle on high-alpine typography because isolated rock
+outcrops in snow mimic text, while words on shaded cliffs blend into rock
+hachures. We use a neural text detector (CRAFT via `easyocr`) to box letter
+strokes and spot heights with high precision. Instead of inpainting them (which
+leaves blurry discs), these regions are masked out of the training loss
+entirely (`ignore_mask`), allowing the continuous DEM to guide seamless rock
+drawing underneath.
+
+**Held-out regions, not random tiles.** Neighbouring tiles share terrain, so a
+random split measures memorisation. Bernina and Uri are held out whole.
+
+## Pipeline
+
+```bash
+python3 scripts/01_build_dataset.py     # harvest + filter Swiss alpine tiles
+python3 scripts/00_prefetch.py          # warm DEM / imagery caches (repeatable)
+python3 scripts/04_textmasks.py         # precompute neural text masks (parallel)
+python3 scripts/bench.py                # throughput + epoch-time estimate
+python3 scripts/02_train.py --epochs 40 # resumable; writes out/ckpt/state.pt
+python3 scripts/03_render.py --lat 46.5 --lon 11.3 --km 8 --out out/dolomites.png
+```
+
+`03_render.py` falls back to analytic relief when no checkpoint exists, so the
+deterministic half is usable on its own. `--analytic` forces it.
+
+## Layout
 
 ```
 dufour/
-├── dufour/
-│   ├── dataset.py      # PyTorch Dataset over the tile cache with on-the-fly features
-│   ├── delabel.py      # Morphological text detection & diffusion inpainting
-│   ├── features.py     # 11-channel DEM feature extractor (multi-azimuth hillshades, curvature)
-│   ├── fetch.py        # Tile fetcher with on-disk caching (swisstopo WMTS + AWS Terrarium)
-│   ├── frame.py        # Multi-tile mosaic coordinate system & Web Mercator projection
-│   ├── legend.py       # Exact swisstopo LK25 symbology, palette, and millimeter rules
-│   ├── model.py        # Pix2Pix Generator (U-Net) & PatchGAN Discriminator with GroupNorm
-│   ├── osm.py          # OpenStreetMap vector fetching via Overpass API with local caching
-│   ├── quality.py      # Tile filtering rules (rejects dense text, urban centers, low relief)
-│   └── tiles.py        # Web Mercator slippy-map tile math (EPSG:3857)
-├── scripts/
-│   ├── 01_build_dataset.py  # Harvester & regional holdout dataset builder
-│   ├── 02_train.py          # Neural training harness (Pix2Pix / cGAN)
-│   ├── 03_render.py         # Full-pipeline map rendering and compositor
-│   ├── palette.py           # K-means recovery of swisstopo area fill ink palette
-│   └── palette_lines.py     # Local-median deviation k-means for fine line feature inks
-├── data/
-│   ├── tiles/               # On-disk tile cache (dem/ and map/) [gitignored]
-│   ├── osm/                 # On-disk Overpass vector cache [gitignored]
-│   ├── train.json           # Training tile manifest
-│   └── val.json             # Validation tile manifest (held-out massifs)
-└── out/                     # Diagnostic outputs, delabel comparisons, and harvest logs
+  tiles.py       XYZ tile maths
+  frame.py       multi-tile mosaic frame; the shared coordinate system
+  fetch.py       swisstopo + terrain tile fetching, disk-cached
+  copernicus.py  GLO-30 access via /vsicurl range reads
+  satellite.py   Sentinel-2 tiles -> greenness / brightness / texture
+  features.py    DEM -> 16 conditioning channels
+  ocr.py         CRAFT-based neural lettering detection & mask caching
+  delabel.py     glyph- and word-level lettering detection
+  separate.py    splits the raster into terrain vs deterministic ink
+  quality.py     training-tile selection
+  dataset.py     torch Dataset; derives features in workers
+  model.py       U-Net generator + PatchGAN discriminator
+  legend.py      LK25 symbology as data, widths in paper mm at 1:25'000
+  render.py      deterministic vector rendering + labels
+  terrain.py     DEM mosaic, contours, analytic and Swiss relief
+
+scripts/
+  00_prefetch.py      warm DEM / satellite caches
+  01_build_dataset.py harvest & filter tiles with regional holdouts
+  02_train.py         Pix2Pix U-Net + PatchGAN training harness
+  03_render.py        composite neural terrain with OSM vector overlay
+  04_textmasks.py     precompute text masks for all dataset tiles
+  bench.py            training throughput benchmark
+  compare.py          diagnostic rendering comparison
+  palette.py          k-means recovery of swisstopo ink colours
 ```
 
----
+## Known limits
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.10+
-- PyTorch, NumPy, SciPy, Pillow
-
-```bash
-pip install torch numpy scipy pillow
-```
-
-### 1. Build / Harvest the Dataset
-Harvest aligned DEM and swisstopo PK25 pairs over Swiss alpine regions with regional holdouts:
-
-```bash
-python scripts/01_build_dataset.py --zoom 15 --workers 12
-```
-
-### 2. Inspect Delabeling & Inpainting
-Run diagnostic tests to view the isolation mask and diffusion inpainting on alpine tiles:
-
-```python
-from dufour.fetch import map_tile
-from dufour.delabel import clean
-from PIL import Image
-
-rgb = map_tile(15, 17079, 11724) # Matterhorn
-cleaned, mask = clean(rgb)
-
-Image.fromarray(cleaned).save("out/matterhorn_cleaned.png")
-```
-
-### 3. Verify Symbology Inks
-Run empirical palette recovery scripts:
-
-```bash
-python scripts/palette.py
-python scripts/palette_lines.py
-```
+- Rock drawing at 30 m is *plausible*, not surveyed: the DEM does not resolve
+  individual couloirs, so stroke placement is inferred from structure and
+  Sentinel-2 texture rather than measured.
+- s2cloudless is CC BY-NC-SA — non-commercial only.
+- OSM alignment in the high Alps is looser than Swiss cadastral survey, so
+  trails can sit a few metres off a cliff edge.
+- Labels are placed by a simple greedy collision test, not a real
+  label-placement solver.
