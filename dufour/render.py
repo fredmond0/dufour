@@ -303,3 +303,21 @@ def glacier_mask(frame, osm):
             x, y = frame.lonlat_to_px(lon, lat)
             d.polygon(list(zip(x, y)), fill=255)
     return np.asarray(im) > 127
+
+
+def draw_hachures(frame, base, strokes, width_mm=0.105):
+    """Paint rock strokes onto the relief plate, under all other line work."""
+    if not strokes:
+        return base
+    mpp = frame.mpp
+    im = Image.fromarray(base).resize((frame.width * SS, frame.height * SS), Image.BICUBIC)
+    d = ImageDraw.Draw(im, "RGBA")
+    w = max(int(round(mm_to_px(width_mm, mpp) * SS)), 1)
+    for pts, ink in strokes:
+        if len(pts) < 2:
+            continue
+        p = [(x * SS, y * SS) for x, y in pts]
+        # Warm-neutral rock ink, alpha carrying the shading weight
+        a = int(np.clip(ink, 0, 1) * 255)
+        d.line(p, fill=(38, 40, 40, a), width=w, joint="curve")
+    return np.asarray(im.resize((frame.width, frame.height), Image.LANCZOS))

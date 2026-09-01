@@ -84,13 +84,23 @@ class Discriminator(nn.Module):
 
     def __init__(self, in_ch, w=64):
         super().__init__()
-        self.b = nn.Sequential(
+        self.blocks = nn.ModuleList([
             Down(in_ch + 3, w, norm=False),
             Down(w, w * 2),
             Down(w * 2, w * 4),
-            nn.Conv2d(w * 4, w * 8, 4, 1, 1, bias=False), _norm(w * 8),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv2d(w * 8, 1, 4, 1, 1))
+            nn.Sequential(nn.Conv2d(w * 4, w * 8, 4, 1, 1, bias=False),
+                          _norm(w * 8), nn.LeakyReLU(0.2, True)),
+            nn.Conv2d(w * 8, 1, 4, 1, 1)])
 
-    def forward(self, cond, img):
-        return self.b(torch.cat([cond, img], 1))
+    def forward(self, cond, img, feats=False):
+        """feats=True also returns intermediate activations, for feature
+        matching. A single adversarial scalar is a very thin gradient for the
+        generator; matching D's internal statistics gives it a much richer
+        signal, and unlike L1 it compares TEXTURE rather than demanding that
+        each hachure stroke land on the exact pixel of the original."""
+        h = torch.cat([cond, img], 1)
+        out = []
+        for b in self.blocks:
+            h = b(h)
+            out.append(h)
+        return (h, out[:-1]) if feats else h

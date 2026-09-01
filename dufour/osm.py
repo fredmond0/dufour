@@ -65,9 +65,26 @@ def fetch(bbox, timeout=180, force=False):
 
 
 def ways(osm):
+    """Yield (tags, geometry) for ways AND for relation members.
+
+    Overpass returns a relation's geometry per MEMBER, not at the top level, so
+    reading el["geometry"] silently drops every multipolygon. Large alpine
+    glaciers are almost always mapped as relations: on the Bernina massif this
+    bug left the ice mask at 2.6% of a heavily glaciated frame, which in turn
+    meant grey shading and brown contours where the sheet should show white ice
+    and blue form lines."""
     for el in osm.get("elements", []):
-        if el.get("type") in ("way", "relation") and el.get("geometry"):
-            yield el.get("tags", {}), el["geometry"]
+        t = el.get("tags", {})
+        if el.get("type") == "way" and el.get("geometry"):
+            yield t, el["geometry"]
+        elif el.get("type") == "relation":
+            if el.get("geometry"):
+                yield t, el["geometry"]
+            for m in el.get("members", []):
+                # inner rings would punch holes; drawing them as fills would be
+                # wrong, so only outers contribute
+                if m.get("geometry") and m.get("role") in ("outer", "", None):
+                    yield t, m["geometry"]
 
 
 def nodes(osm):

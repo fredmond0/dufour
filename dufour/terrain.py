@@ -113,8 +113,18 @@ def analytic_relief(frame, dem=None, off=None):
     return np.clip(rgb * 252, 0, 255).astype(np.uint8)
 
 
-def swiss_relief(frame, dem, off, ridge=0.85, ridge_m=110.0, zf=1.5,
-                 local=0.55, snowline=None):
+def lighten_ice(rgb, ice_mask, amount=0.72):
+    """Glaciers print as near-white with blue form lines, not grey shading."""
+    if ice_mask is None or not ice_mask.any():
+        return rgb
+    out = rgb.astype(np.float32)
+    tgt = np.array([250.0, 252.0, 254.0])
+    m = ice_mask[..., None] * amount
+    return np.clip(out * (1 - m) + tgt * m, 0, 255).astype(np.uint8)
+
+
+def swiss_relief(frame, dem, off, ridge=1.35, ridge_m=110.0, zf=1.9,
+                 local=0.95, snowline=None):
     """Imhof-flavoured relief with explicit ridge enhancement.
 
     A 30 m DEM shaded naively turns the Matterhorn into a cone: its aretes are
@@ -155,18 +165,127 @@ def swiss_relief(frame, dem, off, ridge=0.85, ridge_m=110.0, zf=1.5,
 
     # tone: swisstopo's plate is high-key -- near-white lit ground, shadows
     # that stop well short of black, never a muddy midtone everywhere
-    tone = 0.55 + 0.48 * s
+    tone = 0.66 + 0.36 * s
     lo, hi = np.percentile(h, 2), np.percentile(h, 98)
     alt = np.clip((h - lo) / max(hi - lo, 1e-3), 0, 1)
     tone = tone * (0.93 + 0.11 * alt)              # aerial perspective
-    tone = np.clip(tone, 0.42, 1.0)
+    # swisstopo's plate is high-key: even deep shadow sits around 60-65% grey,
+    # never the 40% this used to bottom out at. Side by side against the real
+    # sheet the old floor read as muddy brown where swisstopo reads as light
+    # cool grey, and that single number was the largest visual difference.
+    tone = np.clip(tone, 0.60, 1.0)
 
     if snowline is not None:
         snow = np.clip((h - snowline) / 350.0, 0, 1)
         tone = tone * (1 - snow) + np.clip(tone * 1.06 + 0.04, 0, 1) * snow
 
-    warm = np.stack([tone * 1.000, tone * 0.988, tone * 0.958], -1)
-    cool = np.stack([tone * 0.958, tone * 0.978, tone * 1.000], -1)
-    m = alt[..., None]
+    # swisstopo's sheet is COOL almost everywhere, with warmth only low down.
+    # Weighting these evenly gave the whole plate a beige cast that read as
+    # obviously wrong beside the real sheet.
+    # Near-neutral throughout. Any appreciable warm bias reads as beige next to
+    # swisstopo's cool grey plate, which was the last obvious tell.
+    warm = np.stack([tone * 1.000, tone * 0.999, tone * 0.994], -1)
+    cool = np.stack([tone * 0.972, tone * 0.986, tone * 1.000], -1)
+    m = np.clip(alt[..., None] * 1.45, 0, 1)
     rgb = (1 - m) * warm + m * cool
     return np.clip(rgb * 254, 0, 255).astype(np.uint8)
+
+
+# --------------------------------------------------------------------------
+def rock_hachures(frame, dem, off, s2=None, slope_min_deg=27.0,
+                  spacing=4.9, max_len=13, step=1.1, seed=7,
+                  strength=1.0, veg_cut=0.54, ice_mask=None):
+    """Swiss-style rock drawing (Felszeichnung), derived rather than learned.
+
+    Swisstopo's rock faces are drawn as fine strokes running down the fall
+    line: they describe form through direction and shade through density and
+    weight. That is a rule a cartographer follows, so it can be computed --
+    which also makes it exact and stable, unlike a GAN that has to guess where
+    every stroke goes from a 30 m DEM.
+
+      where   slopes above ~27 degrees that Sentinel-2 says are not vegetated,
+              minus mapped glaciers. The threshold is calibrated, not guessed:
+              against swisstopo's own drawn rock the median terrain slope here
+              is 30 degrees, and 27 recovers ~80% of the hatched area
+      shape   each stroke traces steepest descent, so strokes follow aretes
+              and gullies instead of lying in one direction
+      weight  keyed to the NW key light: strokes darken and lengthen on shaded
+              flanks and fade on lit ones, which is what makes the rock read
+              as solid rather than as hatching pasted on top
+
+    Returns (strokes, rock_mask): strokes are polylines in frame pixels with a
+    per-stroke ink value, ready for dufour.render to draw.
+    """
+    mpp = frame.mpp
+    d = gaussian_filter(normalize_resolution(dem, mpp), max((22.0 / mpp) / 2.355, 0.6))
+    gy, gx = np.gradient(d, mpp)
+    slope = np.degrees(np.arctan(np.hypot(gx, gy)))
+    hs = hillshade(d, mpp, 315, 45, zf=1.6)
+
+    H, W = frame.height, frame.width
+    sl = slope[off:off + H, off:off + W]
+    sh = hs[off:off + H, off:off + W]
+
+    rock = sl >= slope_min_deg
+    if s2 is not None:
+        from .satellite import channels as s2ch
+        ch = s2ch(s2)
+        green, bright = ch[0], ch[1]
+        if green.shape != (H, W):                   # s2 arrives padded
+            o = (green.shape[0] - H) // 2
+            green = green[o:o + H, o:o + W]; bright = bright[o:o + H, o:o + W]
+        rock &= green < veg_cut
+        # No brightness gate: measured against swisstopo's own hachured area,
+        # S2 brightness does not separate rock from snow at all (median 0.51
+        # inside the drawn rock versus 0.53 outside). Glaciers are excluded
+        # properly below, from OSM geometry.
+    if ice_mask is not None:
+        rock &= ~ice_mask
+    if not rock.any():
+        return [], rock
+
+    # Seed on a jittered grid: a regular lattice reads as wallpaper.
+    rng = np.random.default_rng(seed)
+    ys, xs = np.mgrid[2:H - 2:spacing, 2:W - 2:spacing]
+    ys = ys.ravel() + rng.uniform(-spacing / 2, spacing / 2, ys.size)
+    xs = xs.ravel() + rng.uniform(-spacing / 2, spacing / 2, xs.size)
+    yi = np.clip(ys.astype(int), 0, H - 1); xi = np.clip(xs.astype(int), 0, W - 1)
+    keep = rock[yi, xi]
+    # Denser on steep and on shaded ground, thinner on lit faces
+    p = np.clip((sl[yi, xi] - slope_min_deg) / 20.0, 0.10, 1.0) * (1.20 - 0.85 * sh[yi, xi])
+    keep &= rng.random(ys.size) < np.clip(p * strength, 0, 1)
+    ys, xs = ys[keep], xs[keep]
+    if ys.size == 0:
+        return [], rock
+
+    # March each seed down the fall line.
+    gxf = gx[off:off + H, off:off + W]
+    gyf = gy[off:off + H, off:off + W]
+    n = ys.size
+    L = np.clip((sl[np.clip(ys.astype(int), 0, H - 1),
+                    np.clip(xs.astype(int), 0, W - 1)] - slope_min_deg) / 24.0, 0.3, 1.0)
+    L = (4 + L * (max_len - 4)) * (0.75 + 0.5 * (1 - sh[np.clip(ys.astype(int), 0, H - 1),
+                                                        np.clip(xs.astype(int), 0, W - 1)]))
+    steps = int(max_len / step) + 1
+    px = np.empty((steps, n)); py = np.empty((steps, n))
+    cy, cx = ys.copy(), xs.copy()
+    for s in range(steps):
+        py[s] = cy; px[s] = cx
+        u = map_coordinates(gxf, [cy, cx], order=1, mode="nearest")
+        v = map_coordinates(gyf, [cy, cx], order=1, mode="nearest")
+        m = np.hypot(u, v) + 1e-6
+        cy = np.clip(cy + step * (v / m), 0, H - 1.01)   # descend
+        cx = np.clip(cx + step * (u / m), 0, W - 1.01)
+
+    tone = sh[np.clip(ys.astype(int), 0, H - 1), np.clip(xs.astype(int), 0, W - 1)]
+    # Crisper: swisstopo's rock reads as distinct dark marks with white
+    # between them, not an even grey wash, so ink runs darker and the seeds sit
+    # slightly further apart to leave that white showing through.
+    ink = np.clip(0.34 + 0.62 * (1 - tone), 0, 1)
+
+    strokes = []
+    nsteps = np.clip((L / step).astype(int), 3, steps)
+    for i in range(n):
+        k = nsteps[i]
+        strokes.append((list(zip(px[:k, i], py[:k, i])), float(ink[i])))
+    return strokes, rock

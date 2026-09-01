@@ -13,16 +13,19 @@ text-shaped smudges, contours that do not close. So the work is split by what
 each half is actually good at.
 
 ```
-                 ┌───────────────────────────────────────────┐
-  Copernicus ───►│ LEARNED   relief shading + rock hachures   │──┐
-  GLO-30 DEM     │ (pix2pix U-Net, 16 conditioning channels)  │  │
-  Sentinel-2 ───►└───────────────────────────────────────────┘  │
-                                                                ├─► sheet
+  Copernicus ───►┌───────────────────────────────────────────┐
+  GLO-30 DEM     │ DERIVED  ridge-enhanced relief shading,    │──┐
+  Sentinel-2 ───►│          Swiss rock hachures               │  │
+                 └───────────────────────────────────────────┘  ├─► sheet
   DEM        ───►┌───────────────────────────────────────────┐  │
   OpenStreetMap ►│ DETERMINISTIC  contours, landcover, roads, │──┘
                  │ trails, buildings, labels, spot heights    │
                  └───────────────────────────────────────────┘
 ```
+
+**Status: the relief and rock drawing are currently DERIVED, not learned.** A
+pix2pix generator was trained for this and does not yet work -- see "The GAN
+attempt" below. The analytic path produces the sheets in `out/showcase/`.
 
 The network draws only what cannot be derived from data: interpretive relief
 shading and Felszeichnung (rock drawing). Every feature with a right answer —
@@ -118,11 +121,36 @@ scripts/
   palette.py          k-means recovery of swisstopo ink colours
 ```
 
+## The GAN attempt
+
+Two full training runs failed, in instructive ways.
+
+**Run 1 collapsed adversarially.** D reached loss 0.001 by epoch 11, the
+generator's adversarial gradient vanished, and masked L1 alone drove the
+output. L1's optimum under uncertainty is the mean, so 40 epochs produced
+featureless grey. Preserved in `out/ckpt_v1_collapsed/`.
+
+**Run 2 diverged into a degenerate texture.** After rebalancing (feature
+matching, tone loss, adaptive D gating, L1 35 -> 8) the loss dynamics were
+healthy -- D 0.05-0.17, adv 0.44-0.54 -- and the output did develop structure.
+But by epoch 7 it had settled on uniform vertical bars that ignore terrain: the
+cheapest way to satisfy a texture critic. Preserved in `out/ckpt_v2_striped/`.
+
+The honest read is that DEM -> hachure is very stochastic at stroke level, and
+a PatchGAN on 2784 tiles finds degenerate texture long before it finds
+Felszeichnung. Worth trying next: a VGG/LPIPS perceptual loss, spectral norm on
+D, and substantially more data.
+
+Meanwhile `terrain.rock_hachures()` does the same job by rule, and being a rule
+it is stable, fast (0.3 s/sheet) and controllable.
+
 ## Known limits
 
 - Rock drawing at 30 m is *plausible*, not surveyed: the DEM does not resolve
-  individual couloirs, so stroke placement is inferred from structure and
-  Sentinel-2 texture rather than measured.
+  individual couloirs, so strokes follow computed fall lines rather than the
+  real gullies a surveyor drew. The slope threshold is calibrated against
+  swisstopo's own hatched area (median terrain slope there is 30 degrees;
+  27 recovers ~80% of it) rather than guessed.
 - s2cloudless is CC BY-NC-SA — non-commercial only.
 - OSM alignment in the high Alps is looser than Swiss cadastral survey, so
   trails can sit a few metres off a cliff edge.

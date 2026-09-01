@@ -55,7 +55,8 @@ def _neutral(rgb, tol=26):
     return chroma(rgb) <= tol
 
 
-def deterministic_mask(rgb, thresh=38, min_chroma=25, grow=1):
+def deterministic_mask(rgb, thresh=38, min_chroma=25, grow=1,
+                       ink_chroma=24, ink_max_bright=190):
     """Pixels owned by the deterministic renderer."""
     m = np.zeros(rgb.shape[:2], bool)
     for colours in DETERMINISTIC.values():
@@ -64,6 +65,15 @@ def deterministic_mask(rgb, thresh=38, min_chroma=25, grow=1):
     # AND actually saturated. Either alone lets the relief plate through.
     m &= chroma(rgb) >= min_chroma
     m &= ~_neutral(rgb)
+
+    # Catch-all for coloured ink the named palettes miss. ANY saturated,
+    # non-pale pixel is printed ink, and a DEM cannot predict ink -- leaving it
+    # supervised hands the discriminator a cue the generator can never match,
+    # which is precisely how D saturated at loss 0.001 and killed the
+    # adversarial gradient. The brightness gate spares the pale blue glacier
+    # tint (197,229,246), which is terrain shading rather than line work.
+    f = rgb.astype(np.int16)
+    m |= (chroma(rgb) >= ink_chroma) & (f.min(-1) <= ink_max_bright)
     if grow:
         m = binary_dilation(m, np.ones((2 * grow + 1, 2 * grow + 1)))
     return m

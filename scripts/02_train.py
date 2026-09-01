@@ -47,6 +47,21 @@ def sobel(t):
 MIN_SUPERVISED = 0.02   # fraction of pixels
 
 
+def tone_loss(a, b, keep, k=16):
+    """L1 on a heavily downsampled image: anchors TONE and COLOUR without
+    penalising high frequency.
+
+    With pixel L1 turned down far enough to let the GAN invent hachures,
+    nothing was holding the output's colour: the model drifted to green and
+    purple casts even though the target plate is near-neutral grey. Comparing
+    16x-downsampled means fixes tone at large scale while leaving stroke-level
+    detail entirely to the adversarial and feature-matching terms."""
+    ka = F.avg_pool2d(a * keep, k)
+    kb = F.avg_pool2d(b * keep, k)
+    kk = F.avg_pool2d(keep, k)
+    return (ka - kb).abs().sum() / (kk.sum() * a.shape[1] + 1e-6)
+
+
 def masked_l1(a, b, keep):
     """L1 over supervised pixels only.
 
@@ -96,8 +111,18 @@ def main():
     p.add_argument("--epochs", type=int, default=60)
     p.add_argument("--batch", type=int, default=8)
     p.add_argument("--lr", type=float, default=2e-4)
-    p.add_argument("--l1", type=float, default=80.0)
-    p.add_argument("--edge", type=float, default=12.0)
+    # L1 must stay SMALL here. Unlike edges->photo, the DEM->hachure mapping is
+    # highly stochastic at stroke level: L1's optimum is the average over all
+    # plausible stroke positions, i.e. blur. At weight 35 it contributed ~9.5 to
+    # G's loss against ~0.8 from the adversarial term, pinning G to the mean.
+    p.add_argument("--l1", type=float, default=8.0)
+    p.add_argument("--edge", type=float, default=8.0)
+    p.add_argument("--fm", type=float, default=10.0)
+    p.add_argument("--tone", type=float, default=30.0)
+    p.add_argument("--lr-d", type=float, default=8e-5)
+    p.add_argument("--d-every", type=int, default=2)
+    p.add_argument("--inst-noise", type=float, default=0.08)
+    p.add_argument("--adv-target", type=float, default=0.60)
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--out", default="out/ckpt")
     p.add_argument("--resume", default="")
@@ -115,12 +140,17 @@ def main():
     G = Generator(N_CH).to(dev)
     D = Discriminator(N_CH).to(dev)
     oG = torch.optim.Adam(G.parameters(), a.lr, betas=(0.5, 0.999))
-    oD = torch.optim.Adam(D.parameters(), a.lr, betas=(0.5, 0.999))
+    oD = torch.optim.Adam(D.parameters(), a.lr_d, betas=(0.5, 0.999))
     mse = nn.MSELoss()
 
     out = pathlib.Path(a.out); out.mkdir(parents=True, exist_ok=True)
     (out / "samples").mkdir(exist_ok=True)
     best = 1e9; step = 0; ep0 = 0
+    # Start at 0 so the gate is OPEN and D trains from the first step. Seeding
+    # this at the threshold locked D out entirely: it stayed random, and the
+    # generator chased a meaningless critic (adv exploded to 7.8).
+    adv_ema = 0.0
+    D_WARMUP = 300   # always train D briefly, so the gate judges a real critic
 
     # Full-state checkpointing: G, D and both optimiser states. Resuming with a
     # fresh discriminator throws away the adversary the generator was tuned
@@ -141,26 +171,66 @@ def main():
             fake = G(x)
 
             # --- D on composited real: masked pixels identical in both -------
+            # The previous run collapsed: D reached loss 0.001 by epoch 11, the
+            # generator's adversarial gradient vanished, and L1 alone drove the
+            # output to grey mush. Three brakes on D: a lower learning rate,
+            # updates every d_every steps, and instance noise, which stops D
+            # separating real from fake on imperceptible high-frequency detail.
+            # ADAPTIVE: train D only while the generator is still competitive.
+            # Fixed brakes (lower lr, every-other-step, noise, smoothing) only
+            # slowed the collapse - D still drifted 0.169 -> 0.024 with adv
+            # climbing to 0.69. Gating on adv_ema keeps the game balanced by
+            # construction: when D is winning, it simply stops learning, so the
+            # generator always has a usable gradient.
             real_c = y * keep + fake.detach() * (1 - keep)
-            oD.zero_grad(set_to_none=True)
-            dr, df = D(x, real_c), D(x, fake.detach())
-            lD = 0.5 * (mse(dr, torch.ones_like(dr)) + mse(df, torch.zeros_like(df)))
-            lD.backward(); oD.step()
+            if step % a.d_every == 0 and (step < D_WARMUP or adv_ema < a.adv_target):
+                sigma = a.inst_noise * max(0.0, 1.0 - ep / max(a.epochs * 0.7, 1))
+                def nz(t):
+                    return t + torch.randn_like(t) * sigma if sigma > 0 else t
+                oD.zero_grad(set_to_none=True)
+                dr, df = D(x, nz(real_c)), D(x, nz(fake.detach()))
+                # one-sided label smoothing: never let D be fully certain
+                lD = 0.5 * (mse(dr, torch.full_like(dr, 0.9)) +
+                            mse(df, torch.zeros_like(df)))
+                lD.backward(); oD.step()
+            else:
+                lD = torch.zeros((), device=dev)
 
             # --- G -----------------------------------------------------------
             oG.zero_grad(set_to_none=True)
-            df = D(x, fake)
+            df, f_fake = D(x, fake, feats=True)
+            with torch.no_grad():
+                _, f_real = D(x, real_c, feats=True)
+            l_fm = sum(F.l1_loss(a, b) for a, b in zip(f_fake, f_real)) / len(f_fake)
             l_adv = mse(df, torch.ones_like(df))
+            adv_ema = 0.98 * adv_ema + 0.02 * float(l_adv.detach())
             l_l1 = masked_l1(fake, y, keep)
             l_edge = masked_l1(sobel(fake), sobel(y), keep)
-            (l_adv + a.l1 * l_l1 + a.edge * l_edge).backward(); oG.step()
+            l_tone = tone_loss(fake, y, keep)
+            (l_adv + a.fm * l_fm + a.l1 * l_l1 + a.edge * l_edge
+             + a.tone * l_tone).backward(); oG.step()
 
-            agg += [lD.item(), l_adv.item(), l_l1.item(), l_edge.item()]
+            # When D is winning, FREEZING it does not weaken it -- the generator
+            # is still chasing a critic it cannot beat. Give G a second update
+            # instead, so it actually closes the gap rather than stalling.
+            if adv_ema > a.adv_target:
+                oG.zero_grad(set_to_none=True)
+                fake2 = G(x)
+                df2, f_fake2 = D(x, fake2, feats=True)
+                with torch.no_grad():
+                    _, f_real2 = D(x, y * keep + fake2.detach() * (1 - keep), feats=True)
+                (mse(df2, torch.ones_like(df2))
+                 + a.fm * sum(F.l1_loss(p_, q_) for p_, q_ in zip(f_fake2, f_real2)) / len(f_fake2)
+                 + a.l1 * masked_l1(fake2, y, keep)
+                 + a.tone * tone_loss(fake2, y, keep)).backward()
+                oG.step()
+
+            agg += [lD.item(), l_adv.item(), l_l1.item(), l_fm.item()]
             nb += 1; step += 1
             if step % 100 == 0:
                 d_, g_, l_, e_ = agg / nb
                 print(f"  ep{ep:03d} s{step:06d} D {d_:.3f} adv {g_:.3f} "
-                      f"L1 {l_:.4f} edge {e_:.4f} "
+                      f"advEMA {adv_ema:.3f} L1 {l_:.4f} FM {e_:.4f} "
                       f"({nb*a.batch/(time.time()-t0):.1f} img/s)", flush=True)
 
         G.eval(); v = 0.0; n = 0

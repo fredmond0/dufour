@@ -15,9 +15,11 @@ from PIL import Image
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from dufour.frame import Frame
 from dufour.osm import fetch
-from dufour.render import render_vectors, draw_labels, glacier_mask
+from dufour.render import render_vectors, draw_labels, glacier_mask, draw_hachures
 from dufour.copernicus import sample as cop_sample
-from dufour.terrain import analytic_relief, contours, dem_mosaic, swiss_relief
+from dufour.satellite import s2_mosaic
+from dufour.terrain import (analytic_relief, contours, dem_mosaic,
+                            lighten_ice, rock_hachures, swiss_relief)
 
 
 def main():
@@ -31,6 +33,8 @@ def main():
                    help="analytic hillshade base instead of the learned model")
     p.add_argument("--ckpt", default="out/ckpt/g_latest.pt")
     p.add_argument("--no-labels", action="store_true")
+    p.add_argument("--no-hachures", action="store_true")
+    p.add_argument("--hachure", type=float, default=1.0)
     a = p.parse_args()
 
     f = Frame.around(a.lat, a.lon, a.zoom, a.km)
@@ -56,7 +60,20 @@ def main():
     else:
         from dufour.infer import learned_relief
         base = learned_relief(f, dem, off, a.ckpt)
+    base = lighten_ice(base, ice)
     print(f"  relief   {time.time()-t:5.1f}s", flush=True)
+
+    if not a.no_hachures:
+        t = time.time()
+        try:
+            s2 = s2_mosaic(f, pad_px=0)
+        except Exception:
+            s2 = None
+        strokes, rock = rock_hachures(f, dem, off, s2=s2, strength=a.hachure,
+                                      ice_mask=ice)
+        base = draw_hachures(f, base, strokes)
+        print(f"  hachures {time.time()-t:5.1f}s  {len(strokes)} strokes over "
+              f"{100*rock.mean():.0f}% rock", flush=True)
 
     t = time.time(); img = render_vectors(f, osm, base=base, contours=cs)
     print(f"  vectors  {time.time()-t:5.1f}s", flush=True)
